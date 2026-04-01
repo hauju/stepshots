@@ -1,0 +1,11 @@
+[package]
+name = "stepshots-manifest"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared manifest types for Stepshots demo bundles"
+
+[dependencies]
+serde = { workspace = true }
