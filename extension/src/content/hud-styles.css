@@ -1,0 +1,127 @@
+:host {
+  all: initial;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+}
+
+.rc-hud {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+  background: rgba(20, 20, 24, 0.92);
+  color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  min-width: 200px;
+  overflow: hidden;
+  user-select: none;
+}
+
+.rc-hud-drag {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 2px;
+  cursor: grab;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+
+.rc-hud-drag:active {
+  cursor: grabbing;
+}
+
+.rc-hud-drag-dots {
+  font-size: 11px;
+}
+
+.rc-hud-body {
+  padding: 4px 14px 12px;
+}
+
+.rc-hud-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rc-hud-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  animation: rc-hud-pulse 1s ease-in-out infinite;
+}
+
+.rc-hud-dot-paused {
+  background: #f59e0b;
+  animation: none;
+}
+
+@keyframes rc-hud-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.rc-hud-status-text {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.rc-hud-step-count {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+}
+
+.rc-hud-last-action {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.rc-hud-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rc-hud-btn {
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background 0.15s;
+}
+
+.rc-hud-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.rc-hud-btn-stop {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.rc-hud-btn-stop:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.rc-hud-btn-icon {
+  font-size: 10px;
+}

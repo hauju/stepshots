@@ -1,8 +1,8 @@
-# Stepshots CLI
+# Stepshots
 
-Record, bundle, and upload interactive product demos from the command line.
+Open-source tools for recording interactive product demos.
 
-Stepshots CLI automates browser interactions via headless Chrome to capture step-by-step screenshots, bundles them into `.stepshot` files, and uploads them to [Stepshots](https://stepshots.com) for sharing and embedding.
+This repo contains the **CLI** and **Chrome extension** for [Stepshots](https://stepshots.com) — capture step-by-step screenshots, bundle them into `.stepshot` files, and upload them for sharing and embedding.
 
 ## Installation
 
@@ -60,12 +60,24 @@ stepshots rerecord my-tutorial.stepshot
 
 Tutorials are defined in `stepshots.config.json`. See `stepshots init` for an example.
 
-## Crates
+## Chrome Extension
 
-This repository contains two crates:
+The `extension/` directory contains the Stepshots Recorder — a Chrome extension that records interactions directly in the browser.
 
-- **`stepshots-cli`** — The CLI binary
-- **`stepshots-manifest`** — Shared types for config files and `.stepshot` bundle manifests
+```sh
+cd extension
+bun install
+bun run build
+```
+
+Load the `extension/` folder as an unpacked extension in `chrome://extensions`.
+
+## Project Structure
+
+- **`crates/cli/`** — CLI binary (`stepshots-cli`)
+- **`crates/manifest/`** — Shared types for config files and `.stepshot` bundles (`stepshots-manifest`)
+- **`extension/`** — Chrome extension for in-browser recording
+- **`skills/`** — Claude Code skills for AI-assisted demo creation
 
 ## License
 

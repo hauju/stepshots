@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Stepshots Recorder",
+  "version": "0.1.0",
+  "description": "Record website interactions as interactive product demos",
+  "author": "Stepshots",
+  "homepage_url": "https://stepshots.com",
+  "minimum_chrome_version": "114",
+  "permissions": ["activeTab", "storage", "scripting", "tabs", "sidePanel"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "src/panel/panel.html"
+  },
+  "background": {
+    "service_worker": "dist/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
