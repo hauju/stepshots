@@ -65,6 +65,23 @@ Create `stepshots.config.json` in the project directory. If one exists, read it 
 }
 ```
 
+#### Step Names
+
+Every step supports an optional `name` field — a short, human-readable label describing what the step does. **Always set `name` on every step.** These names appear in analytics charts (completion funnel, time-per-step) so users can see exactly where viewers drop off.
+
+Good names are concise and describe the user intent, not the technical action:
+- "Click Get Started" (not "click button.cta")
+- "Enter email address" (not "type into #email")
+- "View dashboard" (not "wait for .dashboard")
+
+```json
+{
+  "action": "click",
+  "name": "Click Get Started",
+  "selector": "[data-testid='get-started-btn']"
+}
+```
+
 #### Step Actions
 
 Each step has an `action` and typically a `selector`. Available actions:
@@ -140,29 +157,31 @@ Follow these rules when generating configs:
 
 1. **5-10 steps max** — Keep demos focused. Users drop off after ~10 steps.
 
-2. **Annotate every step** — Every step should have at least one highlight with a callout explaining what's happening and why.
+2. **Name every step** — Always set `"name"` on every step. Names appear in analytics charts so demo owners can understand viewer behavior. Use concise, intent-driven labels like "Click Sign Up" or "Enter email".
 
-3. **Lead with context** — Step 0 (the initial screenshot) should have a highlight or popup explaining what the user is looking at.
+3. **Annotate every step** — Every step should have at least one highlight with a callout explaining what's happening and why.
 
-4. **Use delays wisely** — Add `"delay": 1000` for steps that trigger animations or loading states. Default 500ms works for most clicks.
+4. **Lead with context** — Step 0 (the initial screenshot) should have a highlight or popup explaining what the user is looking at.
 
-5. **Blur sensitive data** — Always add `blurRegions` for email addresses, personal data, API keys, or anything that shouldn't be in a public demo.
+5. **Use delays wisely** — Add `"delay": 1000` for steps that trigger animations or loading states. Default 500ms works for most clicks.
 
-6. **Pick stable selectors** — Prefer `#id`, `[data-testid="..."]`, or `[aria-label="..."]` over fragile class-based selectors. Use `stepshots inspect` to find good ones.
+6. **Blur sensitive data** — Always add `blurRegions` for email addresses, personal data, API keys, or anything that shouldn't be in a public demo.
 
-7. **Test with preview first** — Before recording, run preview to verify the flow works:
+7. **Pick stable selectors** — Prefer `#id`, `[data-testid="..."]`, or `[aria-label="..."]` over fragile class-based selectors. Use `stepshots inspect` to find good ones.
+
+8. **Test with preview first** — Before recording, run preview to verify the flow works:
    ```bash
    stepshots preview tutorial-key
    ```
 
-8. **Use `--dry-run` to validate** — Check your config without launching Chrome:
+9. **Use `--dry-run` to validate** — Check your config without launching Chrome:
    ```bash
    stepshots record --dry-run
    ```
 
-9. **One tutorial per feature** — Don't cram multiple features into one demo. Create separate tutorial keys.
+10. **One tutorial per feature** — Don't cram multiple features into one demo. Create separate tutorial keys.
 
-10. **Descriptive tutorial keys** — Use kebab-case keys that describe the flow: `signup-flow`, `create-first-project`, `invite-team-member`.
+11. **Descriptive tutorial keys** — Use kebab-case keys that describe the flow: `signup-flow`, `create-first-project`, `invite-team-member`.
 
 ### Phase 4: Record
 
@@ -223,6 +242,7 @@ Here's a well-structured demo config for a SaaS signup flow:
       "steps": [
         {
           "action": "click",
+          "name": "Click Get Started",
           "selector": "[data-testid='get-started-btn']",
           "highlights": [{
             "callout": "Start by clicking Get Started on the homepage",
@@ -232,6 +252,7 @@ Here's a well-structured demo config for a SaaS signup flow:
         },
         {
           "action": "type",
+          "name": "Enter email address",
           "selector": "#email",
           "text": "demo@example.com",
           "highlights": [{
@@ -243,6 +264,7 @@ Here's a well-structured demo config for a SaaS signup flow:
         },
         {
           "action": "type",
+          "name": "Set password",
           "selector": "#password",
           "text": "SecurePass123!",
           "highlights": [{
@@ -253,6 +275,7 @@ Here's a well-structured demo config for a SaaS signup flow:
         },
         {
           "action": "click",
+          "name": "Submit sign-up form",
           "selector": "button[type='submit']",
           "delay": 1500,
           "highlights": [{
@@ -264,6 +287,7 @@ Here's a well-structured demo config for a SaaS signup flow:
         },
         {
           "action": "wait",
+          "name": "View dashboard",
           "selector": ".dashboard",
           "delay": 2000,
           "highlights": [{
