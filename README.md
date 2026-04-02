@@ -2,7 +2,7 @@
 
 Open-source tools for recording interactive product demos.
 
-This repo contains the **CLI** and **Chrome extension** for [Stepshots](https://stepshots.com) — capture step-by-step screenshots, bundle them into `.stepshot` files, and upload them for sharing and embedding.
+This repo contains the **CLI**, **Chrome extension**, and **React SDK** for [Stepshots](https://stepshots.com) — capture step-by-step screenshots, bundle them into `.stepshot` files, and embed them anywhere.
 
 ## Installation
 
@@ -72,6 +72,20 @@ bun run build
 
 Load the `extension/` folder as an unpacked extension in `chrome://extensions`.
 
+## React SDK
+
+```sh
+bun add @stepshots/react
+```
+
+```tsx
+import { StepshotsDemo } from "@stepshots/react";
+
+<StepshotsDemo demoId="your-demo-id" />
+```
+
+See [`packages/react/`](packages/react/) for full props documentation.
+
 ## Embed Examples
 
 The `examples/` directory has ready-to-use HTML files showing how to embed Stepshots demos:
@@ -85,6 +99,7 @@ The `examples/` directory has ready-to-use HTML files showing how to embed Steps
 - **`crates/cli/`** — CLI binary (`stepshots-cli`)
 - **`crates/manifest/`** — Shared types for config files and `.stepshot` bundles (`stepshots-manifest`)
 - **`extension/`** — Chrome extension for in-browser recording
+- **`packages/react/`** — React component (`@stepshots/react`)
 - **`examples/`** — Embed integration examples
 - **`skills/`** — Claude Code skills for AI-assisted demo creation
 

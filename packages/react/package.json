@@ -1,0 +1,36 @@
+{
+  "name": "@stepshots/react",
+  "version": "0.1.0",
+  "description": "React component for embedding Stepshots demos",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.tsx --format esm,cjs --dts",
+    "dev": "tsup src/index.tsx --format esm,cjs --dts --watch"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hauju/stepshots",
+    "directory": "packages/react"
+  }
+}
