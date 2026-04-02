@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stepshots Embed — All Methods</title>
+  <!--
+    HOW TO USE:
+    1. Start the dev server: dx serve --addr 0.0.0.0
+    2. Replace DEMO_ID below with a real demo ID from your dashboard
+    3. Open this file in a browser (file:// or any HTTP server)
+
+    To change the base URL, update the script src and iframe URLs below.
+  -->
+  <script src="http://localhost:8080/embed.js" defer></script>
+  <script src="http://localhost:8080/stepshots-wc.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+      background: #f8f9fa;
+      color: #1a1a2e;
+    }
+    h1 { margin-bottom: 0.25rem; }
+    p.subtitle { color: #666; margin-top: 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+    .card h2 { margin-top: 0; font-size: 1.1rem; }
+    .card .label {
+      display: inline-block;
+      background: #e8e8ff;
+      color: #4a4a8a;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      margin-bottom: 0.75rem;
+    }
+    iframe {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: none;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Embed Methods — Side by Side</h1>
+  <p class="subtitle">All three embed approaches rendering the same demo for comparison</p>
+
+  <div class="grid">
+    <div class="card">
+      <span class="label">JS Snippet</span>
+      <h2>embed.js</h2>
+      <p>Auto-injects iframes via <code>data-stepshots-demo</code> attributes.</p>
+      <div data-stepshots-demo="DEMO_ID"></div>
+    </div>
+
+    <div class="card">
+      <span class="label">iframe</span>
+      <h2>Raw iframe</h2>
+      <p>Direct <code>&lt;iframe&gt;</code> to the <code>/embed</code> route.</p>
+      <iframe src="http://localhost:8080/embed/DEMO_ID"></iframe>
+    </div>
+
+    <div class="card">
+      <span class="label">Web Component</span>
+      <h2>&lt;stepshots-demo&gt;</h2>
+      <p>Custom element via <code>stepshots-wc.js</code>.</p>
+      <stepshots-demo demo-id="DEMO_ID"></stepshots-demo>
+    </div>
+  </div>
+</body>
+</html>

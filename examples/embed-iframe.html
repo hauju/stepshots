@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stepshots Embed — iframe</title>
+  <!--
+    HOW TO USE:
+    1. Start the dev server: dx serve --addr 0.0.0.0
+    2. Replace DEMO_ID below with a real demo ID from your dashboard
+    3. Open this file in a browser (file:// or any HTTP server)
+
+    To change the base URL, update the iframe src URLs below.
+  -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+      background: #f8f9fa;
+      color: #1a1a2e;
+    }
+    h1 { margin-bottom: 0.25rem; }
+    p.subtitle { color: #666; margin-top: 0; }
+    .example {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .example h2 { margin-top: 0; font-size: 1.1rem; }
+    .example code {
+      display: block;
+      background: #f1f3f5;
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    iframe {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: none;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>iframe Embed</h1>
+  <p class="subtitle">Raw <code>&lt;iframe&gt;</code> pointing at the <code>/embed</code> route</p>
+
+  <div class="example">
+    <h2>Default</h2>
+    <code>&lt;iframe src="http://localhost:8080/embed/DEMO_ID" style="width:100%; aspect-ratio:16/9; border:none;"&gt;&lt;/iframe&gt;</code>
+    <iframe src="http://localhost:8080/embed/DEMO_ID"></iframe>
+  </div>
+
+  <div class="example">
+    <h2>Autoplay + Light Theme</h2>
+    <code>&lt;iframe src="http://localhost:8080/embed/DEMO_ID?autoplay=true&amp;theme=light"&gt;&lt;/iframe&gt;</code>
+    <iframe src="http://localhost:8080/embed/DEMO_ID?autoplay=true&theme=light"></iframe>
+  </div>
+
+  <div class="example">
+    <h2>Hidden Controls + Start at Step 3</h2>
+    <code>&lt;iframe src="http://localhost:8080/embed/DEMO_ID?hideControls=true&amp;start=3"&gt;&lt;/iframe&gt;</code>
+    <iframe src="http://localhost:8080/embed/DEMO_ID?hideControls=true&start=3"></iframe>
+  </div>
+</body>
+</html>

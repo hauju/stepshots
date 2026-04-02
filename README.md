@@ -72,11 +72,20 @@ bun run build
 
 Load the `extension/` folder as an unpacked extension in `chrome://extensions`.
 
+## Embed Examples
+
+The `examples/` directory has ready-to-use HTML files showing how to embed Stepshots demos:
+
+- **`embed-js-snippet.html`** — Lightweight JS snippet integration
+- **`embed-web-component.html`** — `<stepshots-demo>` web component
+- **`embed-iframe.html`** — Simple iframe embed
+
 ## Project Structure
 
 - **`crates/cli/`** — CLI binary (`stepshots-cli`)
 - **`crates/manifest/`** — Shared types for config files and `.stepshot` bundles (`stepshots-manifest`)
 - **`extension/`** — Chrome extension for in-browser recording
+- **`examples/`** — Embed integration examples
 - **`skills/`** — Claude Code skills for AI-assisted demo creation
 
 ## License

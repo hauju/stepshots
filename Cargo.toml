@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Hauke Jung <hauke.jung@outlook.de>"]
 license = "MIT"
-repository = "https://github.com/stepshots/stepshots-cli"
+repository = "https://github.com/hauju/stepshots"
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }

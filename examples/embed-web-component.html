@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stepshots Embed — Web Component</title>
+  <!--
+    HOW TO USE:
+    1. Start the dev server: dx serve --addr 0.0.0.0
+    2. Replace DEMO_ID below with a real demo ID from your dashboard
+    3. Open this file in a browser (file:// or any HTTP server)
+
+    To change the base URL, update the <script> src below.
+  -->
+  <script src="http://localhost:8080/stepshots-wc.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+      background: #f8f9fa;
+      color: #1a1a2e;
+    }
+    h1 { margin-bottom: 0.25rem; }
+    p.subtitle { color: #666; margin-top: 0; }
+    .example {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .example h2 { margin-top: 0; font-size: 1.1rem; }
+    .example code {
+      display: block;
+      background: #f1f3f5;
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <h1>Web Component Embed</h1>
+  <p class="subtitle">Uses <code>&lt;stepshots-demo&gt;</code> custom element via <code>stepshots-wc.js</code></p>
+
+  <div class="example">
+    <h2>Default</h2>
+    <code>&lt;stepshots-demo demo-id="DEMO_ID"&gt;&lt;/stepshots-demo&gt;</code>
+    <stepshots-demo demo-id="DEMO_ID"></stepshots-demo>
+  </div>
+
+  <div class="example">
+    <h2>Autoplay + Light Theme</h2>
+    <code>&lt;stepshots-demo demo-id="DEMO_ID" autoplay theme="light"&gt;&lt;/stepshots-demo&gt;</code>
+    <stepshots-demo demo-id="DEMO_ID" autoplay theme="light"></stepshots-demo>
+  </div>
+
+  <div class="example">
+    <h2>Hidden Controls + Start at Step 3</h2>
+    <code>&lt;stepshots-demo demo-id="DEMO_ID" hide-controls start="3"&gt;&lt;/stepshots-demo&gt;</code>
+    <stepshots-demo demo-id="DEMO_ID" hide-controls start="3"></stepshots-demo>
+  </div>
+
+  <div class="example">
+    <h2>Custom Width (600px)</h2>
+    <code>&lt;stepshots-demo demo-id="DEMO_ID" style="max-width: 600px;"&gt;&lt;/stepshots-demo&gt;</code>
+    <stepshots-demo demo-id="DEMO_ID" style="max-width: 600px;"></stepshots-demo>
+  </div>
+</body>
+</html>
