@@ -1,0 +1,117 @@
+name: "Stepshots Record"
+description: "Record interactive product demos with Stepshots CLI"
+branding:
+  icon: "camera"
+  color: "purple"
+
+inputs:
+  config:
+    description: "Path to stepshots.config.json"
+    required: false
+    default: "stepshots.config.json"
+  tutorials:
+    description: "Comma-separated tutorial keys to record (default: all)"
+    required: false
+  output:
+    description: "Output directory for .stepshot bundles"
+    required: false
+    default: "output"
+  upload:
+    description: "Upload bundles after recording"
+    required: false
+    default: "false"
+  token:
+    description: "Stepshots API token (required if upload is true)"
+    required: false
+  server:
+    description: "Stepshots server URL"
+    required: false
+    default: "https://stepshots.com"
+  demo-id:
+    description: "Replace an existing demo instead of creating a new one"
+    required: false
+  title:
+    description: "Override the demo title on upload"
+    required: false
+  version:
+    description: "Stepshots CLI version (git ref) to install"
+    required: false
+    default: "main"
+
+outputs:
+  bundles:
+    description: "Newline-separated list of recorded .stepshot files"
+    value: ${{ steps.record.outputs.bundles }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+      with:
+        toolchain: stable
+
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      with:
+        cache-on-failure: true
+
+    - name: Install Stepshots CLI
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: cargo install --git https://github.com/hauju/stepshots.git --ref "$INPUT_VERSION" stepshots-cli
+
+    - name: Install Chrome
+      uses: browser-actions/setup-chrome@4f8e94349a351df0f048634f25fec36c3c91eded # v2.1.1
+      with:
+        chrome-version: stable
+
+    - name: Record tutorials
+      id: record
+      shell: bash
+      env:
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_TUTORIALS: ${{ inputs.tutorials }}
+      run: |
+        ARGS=(--config "$INPUT_CONFIG" --output "$INPUT_OUTPUT")
+
+        if [ -n "$INPUT_TUTORIALS" ]; then
+          IFS=',' read -ra TUTORIALS <<< "$INPUT_TUTORIALS"
+          for t in "${TUTORIALS[@]}"; do
+            trimmed="${t#"${t%%[![:space:]]*}"}"
+            trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+            ARGS+=(--tutorial "$trimmed")
+          done
+        fi
+
+        stepshots record "${ARGS[@]}"
+
+        {
+          echo "bundles<<EOF"
+          find "$INPUT_OUTPUT" -name "*.stepshot" -type f
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Upload bundles
+      if: inputs.upload == 'true'
+      shell: bash
+      env:
+        STEPSHOTS_TOKEN: ${{ inputs.token }}
+        INPUT_SERVER: ${{ inputs.server }}
+        INPUT_DEMO_ID: ${{ inputs.demo-id }}
+        INPUT_TITLE: ${{ inputs.title }}
+      run: |
+        UPLOAD_ARGS=()
+        if [ -n "$INPUT_DEMO_ID" ]; then
+          UPLOAD_ARGS+=(--demo-id "$INPUT_DEMO_ID")
+        fi
+        if [ -n "$INPUT_TITLE" ]; then
+          UPLOAD_ARGS+=(--title "$INPUT_TITLE")
+        fi
+
+        while IFS= read -r bundle; do
+          [ -z "$bundle" ] && continue
+          stepshots upload "$bundle" --server "$INPUT_SERVER" "${UPLOAD_ARGS[@]}"
+        done <<< "${{ steps.record.outputs.bundles }}"

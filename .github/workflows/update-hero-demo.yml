@@ -1,0 +1,25 @@
+name: Update Hero Demo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "demo/stepshots.config.json"
+      - ".github/workflows/update-hero-demo.yml"
+  workflow_dispatch:
+
+jobs:
+  record-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Record and upload demo
+        uses: ./
+        with:
+          config: demo/stepshots.config.json
+          tutorials: landing-page
+          upload: "true"
+          token: ${{ secrets.STEPSHOTS_API_KEY }}
+          demo-id: ${{ vars.HERO_DEMO_ID }}
