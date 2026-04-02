@@ -66,6 +66,7 @@ pub async fn run(
     let current_url = get_current_url(&browser).await;
     new_steps.push(BundleManifestStep {
         file: "steps/0.webp".into(),
+        name: step0.name.clone(),
         action: None,
         url: current_url,
         selector: step0.selector.clone(),
@@ -141,6 +142,7 @@ pub async fn run(
 
         new_steps.push(BundleManifestStep {
             file: format!("steps/{i}.webp"),
+            name: old_step.name.clone(),
             action: old_step.action.clone(),
             url: if step_failed {
                 old_step.url.clone()

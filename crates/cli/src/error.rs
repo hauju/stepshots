@@ -23,6 +23,9 @@ pub enum CliError {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
+    #[error("Upgrade error: {0}")]
+    Upgrade(String),
+
     #[error("{0}")]
     Other(String),
 }

@@ -114,6 +114,7 @@ pub async fn record_tutorial(
 
     manifest_steps.push(BundleManifestStep {
         file: "steps/0.webp".into(),
+        name: None,
         action: None,
         url: current_url,
         selector: None,
@@ -200,6 +201,7 @@ pub async fn record_tutorial(
 
         manifest_steps.push(BundleManifestStep {
             file: format!("steps/{step_idx}.webp"),
+            name: step.name.clone(),
             action: Some(step.action.clone()),
             url: current_url,
             selector: step.selector.clone(),

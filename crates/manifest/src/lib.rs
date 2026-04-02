@@ -40,6 +40,8 @@ pub struct TutorialConfig {
 pub struct StepConfig {
     pub action: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -494,6 +496,8 @@ pub struct BundleManifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleManifestStep {
     pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
@@ -538,6 +542,7 @@ impl From<&BundleManifestStep> for StepConfig {
     fn from(step: &BundleManifestStep) -> Self {
         StepConfig {
             action: step.action.clone().unwrap_or_default(),
+            name: step.name.clone(),
             selector: step.selector.clone(),
             text: step.text.clone(),
             url: step.url.clone(),

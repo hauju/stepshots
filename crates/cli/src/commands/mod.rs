@@ -4,4 +4,5 @@ pub mod preview;
 pub mod record;
 pub mod rerecord;
 pub mod serve;
+pub mod upgrade;
 pub mod upload;

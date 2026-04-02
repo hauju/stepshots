@@ -135,6 +135,7 @@ pub fn sample_config() -> String {
                 steps: vec![
                     StepConfig {
                         action: "click".into(),
+                        name: None,
                         selector: Some("button.cta".into()),
                         text: None,
                         url: None,
@@ -161,6 +162,7 @@ pub fn sample_config() -> String {
                     },
                     StepConfig {
                         action: "type".into(),
+                        name: None,
                         selector: Some("input[name=\"email\"]".into()),
                         text: Some("user@example.com".into()),
                         url: None,

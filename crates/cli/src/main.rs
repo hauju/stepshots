@@ -115,6 +115,16 @@ enum Commands {
         #[arg(long, default_value = "800")]
         height: u32,
     },
+    /// Upgrade stepshots to the latest version
+    Upgrade {
+        /// Force reinstall even if already on the latest version
+        #[arg(long)]
+        force: bool,
+
+        /// Only check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
     /// Start a local HTTP server for browser extension integration
     Serve {
         /// Port to listen on
@@ -129,6 +139,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
     let cli = Cli::parse();
 
     if cli.verbose {
@@ -209,6 +220,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 }
             };
             commands::inspect::run(&url, width, height).await?;
+        }
+        Commands::Upgrade { force, check } => {
+            commands::upgrade::run(force, check).await?;
         }
         Commands::Serve { port, output } => {
             commands::serve::run(port, output).await?;
