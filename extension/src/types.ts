@@ -81,6 +81,8 @@ export interface RecordedStep {
   value?: string;
   key?: string;
   url?: string;
+  currentPath?: string;
+  targetUrl?: string;
   scrollX?: number;
   scrollY?: number;
   highlight?: Highlight;

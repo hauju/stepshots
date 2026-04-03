@@ -49,6 +49,8 @@ export function buildBundle(
       ...(step.meta?.captureOnly ? { name: "Capture screen" } : {}),
       action: step.action,
       url: step.url,
+      current_path: step.currentPath,
+      target_url: step.targetUrl,
       selector: step.selector,
       text: step.text,
       key: step.key,
@@ -67,8 +69,8 @@ export function buildBundle(
   const manifest = {
     version: 1,
     viewport: { width: viewport.width, height: viewport.height },
-    baseUrl: state.baseUrl,
-    startPath: state.startPath,
+    base_url: state.baseUrl,
+    start_path: state.startPath,
     steps: manifestSteps,
   };
 
@@ -94,6 +96,8 @@ interface ManifestStep {
   name?: string;
   action?: string;
   url?: string;
+  current_path?: string;
+  target_url?: string;
   selector?: string;
   text?: string;
   key?: string;

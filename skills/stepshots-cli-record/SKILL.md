@@ -1,53 +1,96 @@
 ---
 name: stepshots-cli-record
 description: |
-  Create interactive product demos using the Stepshots CLI from simple natural language instructions.
-  Generates stepshots.config.json with steps, annotations, and overlays, then records and uploads.
-  Use when: (1) User wants to create a product demo or tutorial for a website,
-  (2) User says "record a demo", "create a stepshot", "demo this flow",
-  (3) User describes a click-through flow they want captured as an interactive demo,
-  (4) User wants to document a UI workflow with highlights, callouts, and annotations.
-  Triggers: "stepshot", "record demo", "create demo", "product demo", "interactive demo",
-  "demo this", "capture flow", "stepshots record", "tutorial demo".
+  Create screenshot-based product demos using Stepshots from natural-language flow descriptions.
+  Use when a user wants to record or rerecord a clickthrough demo, generate or edit
+  stepshots.config.json, or turn an existing saved Stepshots demo into a CLI recording config.
+  Works for both CLI-first and Codex-assisted workflows.
 author: Hauke Jung
-version: 1.0.0
+version: 2.0.0
 ---
 
-# Stepshots CLI Demo Creator
+# Stepshots CLI Screenshot Demo Skill
 
-Create interactive product demos from simple instructions using the Stepshots CLI.
+Use this skill when the user wants a screenshot clickthrough demo, not a live HTML replay.
 
-## Prerequisites
+This skill is adapted to the current product model:
+- screenshot demos are the primary path
+- click steps are target-first
+- the extension records explicit actions only
+- `Capture Screen` creates a screenshot-only step
+- old auto-recorded navigation assumptions are no longer the recommended model
 
-The Stepshots CLI must be installed:
-```bash
-cargo install stepshots-cli
-```
+## What Codex Should Do
 
-Chrome or Chromium must be available. Set `CHROME_PATH` env var if not in the default location.
+When using this skill, Codex should:
 
-## Workflow
+1. Understand the flow the user wants to show.
+2. Prefer a clean clickthrough sequence over trying to show every intermediate UI motion.
+3. Generate or update `stepshots.config.json`.
+4. Prefer `click`, `type`, `select`, `key`, `wait`, and explicit scene captures.
+5. Use the CLI to preview, validate, record, or rerecord when needed.
+6. If the user already has a saved demo, export or reconstruct a CLI config from that demo when possible.
 
-### Phase 1: Understand the Flow
+## Product Model
 
-Ask the user what flow they want to capture. You need:
-- **Target URL** — The starting page
-- **Steps** — What to click, type, navigate to (in order)
-- **What to highlight** — Which elements deserve callouts or annotations
+The right mental model is:
 
-If the user gives vague instructions like "demo the signup flow", use the **inspect** command to discover the page structure and selectors:
+- One meaningful action should usually become one demo step.
+- A click step should show the scene where the user clicks.
+- The resulting page or state should be a later step only if it matters.
+- If you need a “resulting scene” without another action, use an explicit capture step in the extension or a `wait` step in CLI configs.
 
-```bash
-stepshots inspect https://example.com
-```
+Do not optimize for showing everything that happened. Optimize for a short, intentional clickthrough.
 
-This launches an interactive REPL showing all clickable elements with their CSS selectors. Use the element numbers to identify correct selectors.
+## Recommended Flow Shape
 
-### Phase 2: Generate the Config
+Default to this structure:
 
-Create `stepshots.config.json` in the project directory. If one exists, read it first and add a new tutorial entry.
+1. Optional intro step:
+   - `wait` on a stable selector with a short delay
+   - use this only when a clean opening scene matters
+2. Action step:
+   - `click`, `type`, `select`, or `key`
+3. Result step:
+   - another meaningful action, or
+   - `wait` if the new state itself should be shown
 
-#### Config Structure
+Avoid flows that are mostly scrolling or passive navigation.
+
+## Preferred Actions
+
+These are the primary actions to recommend:
+
+| Action | Required Fields | Use For |
+|---|---|---|
+| `click` | `selector` | Buttons, links, tabs, toggles |
+| `type` | `selector`, `text` | Text inputs |
+| `select` | `selector`, `value` | Dropdowns |
+| `key` | `key` | Keyboard shortcuts, Enter, Escape |
+| `wait` | `selector` or `delay` | Stable opening states or result-only scenes |
+| `navigate` | `url` | Explicit page jumps in CLI-authored configs |
+
+These are supported but not recommended for the main product path:
+
+| Action | Status | Guidance |
+|---|---|---|
+| `scroll` | legacy/edge case | Use only when scroll itself matters |
+| `scroll-to` | edge case | Prefer direct state capture instead |
+| `hover` | edge case | Do not rely on it for core screenshot demos |
+
+## Current Extension Behavior
+
+The extension now behaves like this:
+
+- It records explicit actions only.
+- It does not auto-create a separate navigation step after a click.
+- A clicked target gets an automatic highlight.
+- `Capture Screen` or `Alt+Shift+S` creates a screenshot-only step.
+- If you click a nav link and want to also show the destination page, add a capture after navigation completes.
+
+When describing extension workflows to users, explain it in exactly those terms.
+
+## CLI Config Structure
 
 ```json
 {
@@ -55,210 +98,216 @@ Create `stepshots.config.json` in the project directory. If one exists, read it 
   "viewport": { "width": 1280, "height": 800 },
   "defaultDelay": 500,
   "tutorials": {
-    "tutorial-key": {
-      "url": "/starting-path",
-      "title": "Human-Readable Title",
-      "description": "What this demo shows",
+    "getting-started": {
+      "url": "/",
+      "title": "Getting Started",
+      "description": "Short clickthrough of the core flow",
       "steps": []
     }
   }
 }
 ```
 
-#### Step Names
+## Step Guidance
 
-Every step supports an optional `name` field — a short, human-readable label describing what the step does. **Always set `name` on every step.** These names appear in analytics charts (completion funnel, time-per-step) so users can see exactly where viewers drop off.
+### `click`
 
-Good names are concise and describe the user intent, not the technical action:
-- "Click Get Started" (not "click button.cta")
-- "Enter email address" (not "type into #email")
-- "View dashboard" (not "wait for .dashboard")
+Use for the primary progression in most demos.
 
 ```json
 {
   "action": "click",
-  "name": "Click Get Started",
-  "selector": "[data-testid='get-started-btn']"
-}
-```
-
-#### Step Actions
-
-Each step has an `action` and typically a `selector`. Available actions:
-
-| Action | Required Fields | Description |
-|--------|----------------|-------------|
-| `click` | `selector` | Click an element |
-| `type` | `selector`, `text` | Clear field and type text |
-| `key` | `key` | Press a key (Enter, Escape, Tab, etc.) |
-| `scroll` | `scrollX`, `scrollY` | Scroll the page or element (relative, uses `scrollBy`) |
-| `scroll-to` | `selector` | Scroll an element into view (`scrollIntoView` with `block:'center'`) |
-| `hover` | `selector` | Focus/hover an element |
-| `navigate` | `url` | Go to a URL (relative or absolute) |
-| `wait` | `selector` or `delay` | Wait for element to appear or delay in ms |
-| `select` | `selector`, `value` | Set a dropdown value |
-
-#### Annotations (Overlays)
-
-Add these to any step to annotate the screenshot taken AFTER the step's action executes. Overlay selectors are resolved against the current viewport — elements must be visible on screen at that scroll/navigation position. Off-screen overlays are automatically skipped with a warning during recording.
-
-**Highlights** — Draw attention to an element with optional callout text:
-```json
-{
-  "action": "click",
-  "selector": "#signup-btn",
+  "name": "Open pricing",
+  "selector": "nav a[href='/pricing']",
   "highlights": [{
-    "callout": "Click here to sign up",
+    "callout": "Open the pricing page",
     "position": "bottom",
-    "showBorder": true,
-    "arrow": true
+    "showBorder": true
   }]
 }
 ```
-The highlight targets the step's own `selector` by default. Override with `highlightSelector` on the step to highlight a different element than the action target. `position` can be `top`, `bottom`, `left`, or `right`.
 
-**IMPORTANT: Only one highlight per step.** The CLI only resolves `highlights[0]` — additional entries are ignored. Highlights do NOT have their own `selector` field; they always use the step's `selector` (or `highlightSelector`). To annotate multiple elements in one step, use the highlight for the primary element and hotspots or popups for secondary elements (these DO have their own `selector` fields).
+### `wait`
 
-**Blur Regions** — Redact sensitive content:
+Use when the resulting scene matters but there is no new user action yet.
+
 ```json
-"blurRegions": [{ "selector": ".credit-card-number" }]
+{
+  "action": "wait",
+  "name": "View pricing page",
+  "selector": "main h1",
+  "delay": 1200,
+  "highlights": [{
+    "callout": "Plans are shown here",
+    "position": "bottom",
+    "showBorder": true
+  }]
+}
 ```
 
-**Hotspots** — Pulsing indicators on elements:
+### `type`
+
 ```json
-"hotspots": [{
-  "selector": ".important-feature",
-  "callout": "New feature!",
-  "position": "top",
-  "size": 20
-}]
+{
+  "action": "type",
+  "name": "Enter email",
+  "selector": "#email",
+  "text": "demo@example.com",
+  "highlights": [{
+    "callout": "Enter your work email",
+    "position": "right",
+    "showBorder": true
+  }]
+}
 ```
 
-**Popups** — Rich info tooltips:
+### `navigate`
+
+Use only when you intentionally want a direct page jump in a CLI-authored flow. Do not use it as a replacement for every link click by default.
+
+```json
+{
+  "action": "navigate",
+  "name": "Go to docs",
+  "url": "/docs"
+}
+```
+
+## Overlays
+
+For launch-quality screenshot demos, prefer simple overlays:
+
+- one highlight per step
+- short callout text
+- occasional popup when more context is needed
+- blur sensitive data
+
+### Highlights
+
+```json
+{
+  "highlights": [{
+    "callout": "Start here",
+    "position": "bottom",
+    "showBorder": true,
+    "arrow": false
+  }]
+}
+```
+
+Important:
+- treat one primary highlight per step as the default
+- keep callouts short
+- the highlight should explain what the viewer should notice, not restate the selector
+
+### Blur Regions
+
+```json
+"blurRegions": [{ "selector": ".api-key" }]
+```
+
+### Popups
+
+Use only when a short highlight is not enough.
+
 ```json
 "popups": [{
-  "selector": ".dashboard-widget",
-  "title": "Analytics Dashboard",
-  "body": "View real-time metrics here",
-  "width": 300
+  "selector": ".analytics-widget",
+  "title": "Analytics",
+  "body": "Track views and completion here",
+  "width": 280
 }]
 ```
 
-**Arrows** — Connect two elements visually:
-```json
-"arrows": [{
-  "fromSelector": ".step-1",
-  "toSelector": ".step-2",
-  "color": "#FF0000",
-  "strokeWidth": 2
-}]
-```
+## Best Practices
 
-### Phase 3: Best Practices for Great Demos
+1. Keep demos short. Target 4 to 8 steps.
+2. Use one primary action per step.
+3. Name every step with user intent, not implementation detail.
+4. Prefer clickthrough scenes over scroll-heavy storytelling.
+5. Use `wait` to show result states instead of inventing motion.
+6. Prefer stable selectors: `#id`, `[data-testid]`, `[aria-label]`, then semantic selectors.
+7. Scope selectors when there are repeated elements.
+8. Keep callout text compact.
+9. Blur anything sensitive.
+10. Record cleanly first; polish in the dashboard editor after upload.
 
-Follow these rules when generating configs:
+## How Codex Should Build Configs
 
-1. **5-10 steps max** — Keep demos focused. Users drop off after ~10 steps.
+When generating configs:
 
-2. **Name every step** — Always set `"name"` on every step. Names appear in analytics charts so demo owners can understand viewer behavior. Use concise, intent-driven labels like "Click Sign Up" or "Enter email".
+- read an existing `stepshots.config.json` first if it exists
+- preserve existing tutorial keys unless the user wants a new one
+- avoid rewriting unrelated tutorials
+- prefer adding a new tutorial entry rather than replacing the file wholesale
+- keep JSON formatting clean and minimal
 
-3. **Annotate every step** — Every step should have at least one highlight with a callout explaining what's happening and why.
+If the user gives a vague flow, Codex should inspect the page first.
 
-4. **Lead with context** — Step 0 (the initial screenshot) should have a highlight or popup explaining what the user is looking at.
+## Selector Discovery
 
-5. **Use delays wisely** — Add `"delay": 1000` for steps that trigger animations or loading states. Default 500ms works for most clicks.
-
-6. **Blur sensitive data** — Always add `blurRegions` for email addresses, personal data, API keys, or anything that shouldn't be in a public demo.
-
-7. **Pick stable selectors** — Prefer `#id`, `[data-testid="..."]`, or `[aria-label="..."]` over fragile class-based selectors. Use `stepshots inspect` to find good ones.
-
-8. **Test with preview first** — Before recording, run preview to verify the flow works:
-   ```bash
-   stepshots preview tutorial-key
-   ```
-
-9. **Use `--dry-run` to validate** — Check your config without launching Chrome:
-   ```bash
-   stepshots record --dry-run
-   ```
-
-10. **One tutorial per feature** — Don't cram multiple features into one demo. Create separate tutorial keys.
-
-11. **Descriptive tutorial keys** — Use kebab-case keys that describe the flow: `signup-flow`, `create-first-project`, `invite-team-member`.
-
-12. **Overlays must target visible elements** — Highlights, hotspots, and other overlays are only recorded when their target element is visible in the viewport at that step. If a highlight targets an element that has scrolled off-screen, it will be skipped with a warning. Make sure scroll steps bring target elements into view before annotating them.
-
-13. **One highlight per scroll section** — When scrolling through a long page, each scroll step should highlight elements visible at that scroll position. Don't add a highlight targeting an element from a previous scroll position — it won't be visible and will be skipped.
-
-14. **Callout position matters** — Choose `position` (`top`, `bottom`, `left`, `right`) based on where there's space around the target element. Elements near edges may have their callout auto-flipped to the opposite side. Avoid `left` position for elements near the left edge.
-
-15. **Keep callout text short (5-8 words)** — Long callouts get squeezed into narrow columns, especially near viewport edges. "Search docs with ⌘K" beats "Instant search across all docs — find any topic in seconds with ⌘K". If you need more text, use a `popup` instead (it has a fixed `width` parameter).
-
-16. **`scroll-to` skips the delay** — For scroll actions, the step's `delay` is skipped because the CLI captures transition frames (~600ms) instead. If the scroll is long and overlays resolve off-screen, split into two steps: a bare `scroll-to` step (no overlays), then a `wait` step with `delay` and the overlays.
-
-17. **Prefer `scroll-to` over `scroll`** — `scroll` uses relative `scrollBy` with pixel offsets that break when page layout changes. `scroll-to` uses `scrollIntoView` on a selector, which adapts to any layout. Use `scroll` only when you need precise pixel control.
-
-18. **Prefer `navigate` over `click` for nav links** — Clicking nav links can fail if the element is obscured after scrolling. `navigate` with a relative URL is more reliable for page transitions.
-
-19. **Use section IDs for scroll targets** — When scrolling through a long page, target stable `#id` selectors (e.g., `#features`, `#pricing`) rather than class-based selectors that may break with Tailwind/CSS changes.
-
-20. **Record clean, polish in dashboard** — For marketing-quality demos, record screenshots with minimal CLI overlays, then upload and use the visual overlay editor in the dashboard to place annotations precisely. The CLI is best for capturing the flow; the editor is best for making it look polished.
-
-21. **Add a `wait` step at the start** — Before any actions, add a `wait` step with a stable selector (e.g. `"selector": "body"` or a hero element) and a `delay` of 1000-1500ms. This ensures the page is fully rendered before the first screenshot. Dynamic pages (SPAs, lazy-loaded content) need this especially.
-
-22. **Preview → dry-run → record** — Follow this workflow: `stepshots preview` (visible browser, verify flow works) → `stepshots record --dry-run` (validate config without Chrome) → `stepshots record` (final recording). Don't skip straight to record.
-
-23. **Scope selectors with context** — When a page has multiple similar elements (e.g. several "Submit" buttons), scope selectors to their container: use `#signup-form button[type="submit"]` instead of just `button[type="submit"]`. This prevents matching the wrong element.
-
-24. **Use `rerecord` when UI changes** — When the target site updates its design, run `stepshots rerecord output/tutorial.stepshot` instead of re-recording from scratch. This replays all actions on the current version while preserving your overlay annotations, saving manual annotation work.
-
-25. **Add delay for page transitions** — Steps that trigger navigation (click on a link, form submit) need `"delay": 1500` or higher to let the new page fully load before the screenshot is captured. Default 500ms is too fast for most page transitions.
-
-### Phase 4: Record
+Use:
 
 ```bash
-# Record a specific tutorial
+stepshots inspect https://example.com
+```
+
+Prefer selectors in this order:
+
+1. `#id`
+2. `[data-testid]`, `[data-cy]`, `[data-test]`
+3. `[aria-label]`
+4. semantic selectors like `button[type='submit']`
+5. scoped class selectors
+
+Avoid:
+
+- generated IDs
+- brittle `nth-child` chains unless there is no better option
+- selectors that match multiple similar elements without context
+
+## Preview and Validation Workflow
+
+Recommended sequence:
+
+```bash
+stepshots preview tutorial-key
+stepshots record --dry-run
 stepshots record -t tutorial-key
-
-# Record all tutorials
-stepshots record
-
-# Record to a specific directory
-stepshots record -t tutorial-key -o ./demos
 ```
 
-Output: `output/tutorial-key.stepshot` (ZIP bundle with manifest + PNG screenshots).
+Use:
+- `preview` to verify selector accuracy and flow logic
+- `record --dry-run` to validate config structure
+- `record` for final capture
 
-### Phase 5: Upload (Optional)
+## Rerecord Workflow
 
-If the user wants to publish:
-
-```bash
-# Set auth token
-export STEPSHOTS_TOKEN="your-api-token"
-
-# Upload
-stepshots upload output/tutorial-key.stepshot
-
-# Upload with custom title
-stepshots upload output/tutorial-key.stepshot --title "Getting Started Guide"
-```
-
-The upload returns a shareable URL.
-
-### Phase 6: Re-record (When UI Changes)
-
-To update screenshots without rewriting the config:
+If the UI changed but the flow is conceptually the same:
 
 ```bash
 stepshots rerecord output/tutorial-key.stepshot
 ```
 
-This replays all actions on the current version of the site and captures fresh screenshots while preserving annotations.
+This preserves annotations while refreshing screenshots.
 
-## Example: Complete Config
+If the user already has a saved demo in the dashboard:
+- prefer exporting `stepshots.config.json` from the demo first
+- then use that config with the CLI for deterministic rerecording
 
-Here's a well-structured demo config for a SaaS signup flow:
+## Dashboard Export Guidance
+
+The dashboard can now export a saved screenshot demo as `stepshots.config.json` for CLI rerecording.
+
+Use this when:
+- the user already created the flow in the extension
+- they want a repo-friendly config
+- they want to automate rerecording in CI or locally
+
+Be explicit about one limitation:
+- older demos may not export fully if they were created before recording origin metadata was stored
+
+## Example Config
 
 ```json
 {
@@ -272,65 +321,68 @@ Here's a well-structured demo config for a SaaS signup flow:
       "description": "Create your account in under a minute",
       "steps": [
         {
+          "action": "wait",
+          "name": "View homepage",
+          "selector": "main",
+          "delay": 1200,
+          "highlights": [{
+            "callout": "Start on the homepage",
+            "position": "bottom",
+            "showBorder": false
+          }]
+        },
+        {
           "action": "click",
           "name": "Click Get Started",
           "selector": "[data-testid='get-started-btn']",
           "highlights": [{
-            "callout": "Start by clicking Get Started on the homepage",
+            "callout": "Start the signup flow",
             "position": "bottom",
             "showBorder": true
           }]
         },
         {
-          "action": "type",
-          "name": "Enter email address",
-          "selector": "#email",
-          "text": "demo@example.com",
+          "action": "wait",
+          "name": "View signup form",
+          "selector": "form#signup",
+          "delay": 1200,
           "highlights": [{
-            "callout": "Enter your email address",
+            "callout": "The signup form opens here",
             "position": "right",
             "showBorder": true
-          }],
-          "blurRegions": [{ "selector": ".social-login-section" }]
+          }]
         },
         {
           "action": "type",
-          "name": "Set password",
-          "selector": "#password",
-          "text": "SecurePass123!",
+          "name": "Enter email",
+          "selector": "#email",
+          "text": "demo@example.com",
           "highlights": [{
-            "callout": "Choose a strong password",
+            "callout": "Enter your email",
             "position": "right",
             "showBorder": true
           }]
         },
         {
           "action": "click",
-          "name": "Submit sign-up form",
+          "name": "Submit form",
           "selector": "button[type='submit']",
           "delay": 1500,
           "highlights": [{
-            "callout": "Submit to create your account",
+            "callout": "Submit to continue",
             "position": "top",
-            "showBorder": true,
-            "arrow": true
+            "showBorder": true
           }]
         },
         {
           "action": "wait",
           "name": "View dashboard",
           "selector": ".dashboard",
-          "delay": 2000,
+          "delay": 1500,
           "highlights": [{
-            "callout": "Welcome to your new dashboard!",
+            "callout": "You land on the dashboard",
             "position": "bottom",
             "showBorder": false
-          }],
-          "popups": [{
-            "selector": ".onboarding-wizard",
-            "title": "Next Steps",
-            "body": "The onboarding wizard will guide you through setup",
-            "width": 280
           }]
         }
       ]
@@ -339,11 +391,13 @@ Here's a well-structured demo config for a SaaS signup flow:
 }
 ```
 
-## Selector Discovery Tips
+## Summary
 
-When the user doesn't provide selectors, discover them:
+This skill should push Codex toward:
 
-1. **Use `stepshots inspect`** for an interactive element browser
-2. **Prefer stability**: `#id` > `[data-testid]` > `[aria-label]` > `.class` > CSS path
-3. **Test selectors** in browser devtools: `document.querySelector('your-selector')`
-4. **Avoid**: Selectors with dynamic IDs, deeply nested paths, or nth-child chains
+- screenshot demos over live replay
+- short clickthroughs over long motion-heavy recordings
+- explicit scenes over inferred navigation
+- clean config generation
+- CLI preview/record/rerecord workflows
+- dashboard export when a saved demo already exists

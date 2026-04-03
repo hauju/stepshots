@@ -146,6 +146,8 @@ pub async fn record_tutorial(
             step.selector.as_deref().unwrap_or("")
         ));
 
+        wait_for_step_target(&browser, step).await?;
+
         // Execute the action (may capture transition frames for scroll steps)
         let action_result = execute_action(&browser, step, &config.base_url).await?;
 
@@ -263,6 +265,32 @@ pub async fn record_tutorial(
     create_bundle(&manifest, &screenshots, &all_transition_frames, output_path)?;
 
     Ok(())
+}
+
+async fn wait_for_step_target(browser: &Browser, step: &StepConfig) -> Result<(), CliError> {
+    let selector = match step.action.as_str() {
+        "click" | "type" | "select" | "hover" => step.selector.as_deref(),
+        _ => None,
+    };
+
+    let Some(selector) = selector else {
+        return Ok(());
+    };
+
+    let timeout = std::time::Duration::from_secs(10);
+    let start = std::time::Instant::now();
+    loop {
+        if browser.page().find_element(selector).await.is_ok() {
+            return Ok(());
+        }
+        if start.elapsed() > timeout {
+            return Err(CliError::Action(format!(
+                "Timed out waiting for selector '{selector}' before '{}' action",
+                step.action
+            )));
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
 }
 
 /// Returns true if bounds are at least partially visible within the viewport.

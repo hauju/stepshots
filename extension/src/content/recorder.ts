@@ -237,10 +237,13 @@ function onKeyDown(e: KeyboardEvent): void {
 // --- Helpers ---
 
 function createStep(action: StepAction, el: Element): RecordedStep {
+  const anchor = el.closest("a[href]") as HTMLAnchorElement | null;
   return {
     id: crypto.randomUUID(),
     action,
     selector: generateSelector(el),
+    currentPath: location.pathname + location.search,
+    targetUrl: anchor?.getAttribute("href") ?? undefined,
     targetBounds: captureTargetBounds(el),
     meta: captureElementMeta(el),
     timestamp: Date.now(),

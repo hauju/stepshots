@@ -487,8 +487,10 @@ pub struct Viewport {
 pub struct BundleManifest {
     pub version: u32,
     pub viewport: Viewport,
+    #[serde(alias = "baseUrl")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    #[serde(alias = "startPath")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -506,6 +508,10 @@ pub struct BundleManifestStep {
     pub action: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_url: Option<String>,
     #[serde(default)]
     pub selector: Option<String>,
     #[serde(alias = "annotations")]
