@@ -15,6 +15,7 @@
     <input type="text" id="tutorial-title" placeholder="e.g. Sign Up Flow">
     <label for="tutorial-desc">Description (optional)</label>
     <input type="text" id="tutorial-desc" placeholder="e.g. How to create an account">
+    <p id="setup-status" class="record-status" hidden></p>
     <button id="btn-start" class="btn btn-primary">Start Recording</button>
     <details id="setup-guidance" class="setup-guidance">
       <summary>Recording tips</summary>
@@ -78,12 +79,12 @@
         </div>
         <p class="meta">Viewport size for screenshot rendering. Defaults to captured dimensions.</p>
         <div class="export-actions">
-          <button id="btn-export" class="btn">Export JSON</button>
-          <button id="btn-copy" class="btn">Copy to Clipboard</button>
+          <button id="btn-export" class="btn">Download config</button>
+          <button id="btn-copy" class="btn">Copy config</button>
         </div>
       </div>
     </details>
-    <button id="btn-new" class="btn btn-link">New Recording</button>
+    <button id="btn-new" class="btn btn-link">Start new recording</button>
   </div>
 
   <!-- Settings view -->

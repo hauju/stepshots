@@ -12,6 +12,7 @@ const tabInfo = document.getElementById("tab-info")!;
 const setupGuidance = document.getElementById("setup-guidance") as HTMLDetailsElement;
 const inputTitle = document.getElementById("tutorial-title") as HTMLInputElement;
 const inputDesc = document.getElementById("tutorial-desc") as HTMLInputElement;
+const setupStatus = document.getElementById("setup-status")!;
 const btnStart = document.getElementById("btn-start")!;
 const btnSettingsToggle = document.getElementById("btn-settings-toggle")!;
 
@@ -90,6 +91,18 @@ function showView(view: "setup" | "recording" | "export" | "settings"): void {
   if (view === "setup") {
     loadTabInfo();
   }
+}
+
+function showSetupStatus(message: string, tone: "error" | "progress" | "success" = "error"): void {
+  setupStatus.hidden = false;
+  setupStatus.textContent = message;
+  setupStatus.className = `record-status ${tone}`;
+}
+
+function hideSetupStatus(): void {
+  setupStatus.hidden = true;
+  setupStatus.textContent = "";
+  setupStatus.className = "record-status";
 }
 
 function renderState(state: RecordingState): void {
@@ -452,8 +465,11 @@ btnStart.addEventListener("click", async () => {
   const title = inputTitle.value.trim();
   if (!title) {
     inputTitle.style.borderColor = "#d93025";
+    showSetupStatus("Add a title before you start recording.");
     return;
   }
+  inputTitle.style.borderColor = "";
+  hideSetupStatus();
 
   previousStepCount = 0;
   expandedStepId = null;
@@ -471,6 +487,8 @@ btnStart.addEventListener("click", async () => {
 
   if (state && !("error" in state)) {
     renderState(state as RecordingState);
+  } else if (state?.error) {
+    showSetupStatus(state.error);
   }
 });
 
@@ -498,7 +516,7 @@ btnExport.addEventListener("click", async () => {
 
   if (result?.json) {
     exportedJson = result.json;
-    downloadJson(exportedJson, "clickthrough.config.json");
+    downloadJson(exportedJson, "stepshots.config.json");
   }
 });
 
@@ -517,7 +535,7 @@ btnCopy.addEventListener("click", async () => {
   if (exportedJson) {
     await navigator.clipboard.writeText(exportedJson);
     btnCopy.textContent = "Copied!";
-    setTimeout(() => { btnCopy.textContent = "Copy to Clipboard"; }, 1500);
+    setTimeout(() => { btnCopy.textContent = "Copy config"; }, 1500);
   }
 });
 
@@ -543,7 +561,7 @@ btnUploadStepshots.addEventListener("click", async () => {
   }
 
   uploadStatus.hidden = false;
-  uploadStatus.textContent = "Building bundle & uploading...";
+  uploadStatus.textContent = "Building bundle and uploading demo…";
   uploadStatus.className = "record-status progress";
   uploadResult.hidden = true;
   btnUploadStepshots.setAttribute("disabled", "true");
@@ -561,8 +579,8 @@ btnUploadStepshots.addEventListener("click", async () => {
       uploadStatus.hidden = true;
       uploadResult.hidden = false;
       uploadResult.innerHTML = `
-        <p class="upload-success-text">Uploaded successfully!</p>
-        <a href="${result.editorUrl}" class="upload-editor-link" target="_blank">Open in Editor &rarr;</a>
+        <p class="upload-success-text">Upload complete.</p>
+        <a href="${result.editorUrl}" class="upload-editor-link" target="_blank">Open in editor &rarr;</a>
       `;
       uploadResult.querySelector(".upload-editor-link")?.addEventListener("click", (e) => {
         e.preventDefault();
@@ -586,6 +604,7 @@ btnNew.addEventListener("click", () => {
   previousStepCount = 0;
   expandedStepId = null;
   hideUndoBar();
+  hideSetupStatus();
   inputTitle.value = "";
   inputDesc.value = "";
   uploadResult.hidden = true;

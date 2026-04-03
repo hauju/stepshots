@@ -519,6 +519,37 @@ input:focus {
   margin-bottom: 4px;
 }
 
+.record-status {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.record-status.error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.record-status.progress {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.record-status.success {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.status-link {
+  color: inherit;
+  font-weight: 600;
+}
+
 .export-title {
   font-size: 14px;
   font-weight: 600;
@@ -617,33 +648,4 @@ input:focus {
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 11px;
-}
-
-/* Upload / Record status */
-.record-status {
-  font-size: 12px;
-  margin-top: 8px;
-  padding: 6px 8px;
-  border-radius: 4px;
-}
-
-.record-status.progress {
-  color: #1a73e8;
-  background: #e8f0fe;
-}
-
-.record-status.success {
-  color: #137333;
-  background: #e6f4ea;
-}
-
-.record-status.error {
-  color: #d93025;
-  background: #fce8e6;
-}
-
-.status-link {
-  color: #1a73e8;
-  text-decoration: underline;
-  cursor: pointer;
 }
