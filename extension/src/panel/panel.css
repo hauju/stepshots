@@ -21,6 +21,18 @@ h1 {
   margin-bottom: 12px;
 }
 
+.panel-intro {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #5f6368;
+  margin-bottom: 12px;
+}
+
+.panel-intro-compact {
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+
 label {
   display: block;
   font-size: 11px;

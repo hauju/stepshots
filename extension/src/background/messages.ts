@@ -121,6 +121,12 @@ export interface ExportResultMessage {
   json: string;
 }
 
+export interface UploadProgressMessage {
+  type: "UPLOAD_PROGRESS";
+  stage: "bundle" | "upload" | "finalize";
+  message: string;
+}
+
 export type Message =
   | StartRecordingMessage
   | StopRecordingMessage
@@ -144,4 +150,5 @@ export type Message =
   | HideOverlaysMessage
   | ShowOverlaysMessage
   | StateUpdateMessage
-  | ExportResultMessage;
+  | ExportResultMessage
+  | UploadProgressMessage;

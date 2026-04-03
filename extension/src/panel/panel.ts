@@ -105,6 +105,20 @@ function hideSetupStatus(): void {
   setupStatus.className = "record-status";
 }
 
+function showUploadStatus(message: string, tone: "error" | "progress" | "success" = "progress"): void {
+  uploadStatus.hidden = false;
+  uploadStatus.textContent = message;
+  uploadStatus.className = `record-status ${tone}`;
+}
+
+function resetUploadFeedback(): void {
+  uploadResult.hidden = true;
+  uploadResult.innerHTML = "";
+  uploadStatus.hidden = true;
+  uploadStatus.textContent = "";
+  uploadStatus.className = "record-status";
+}
+
 function renderState(state: RecordingState): void {
   currentState = state;
 
@@ -148,9 +162,7 @@ function renderState(state: RecordingState): void {
       <p class="export-steps-count">${state.steps.length} step${state.steps.length !== 1 ? "s" : ""} recorded</p>
     `;
 
-    // Reset upload state
-    uploadResult.hidden = true;
-    uploadStatus.hidden = true;
+    resetUploadFeedback();
   } else {
     showView("setup");
   }
@@ -544,7 +556,7 @@ btnUploadStepshots.addEventListener("click", async () => {
   const settingsResult = await sendMessage({ type: "GET_SETTINGS" });
   if (!settingsResult?.apiKey) {
     uploadStatus.hidden = false;
-    uploadStatus.innerHTML = `No API key configured. <a href="#" id="upload-go-settings" class="status-link">Open Settings</a>`;
+    uploadStatus.innerHTML = `Add an API key in <a href="#" id="upload-go-settings" class="status-link">Settings</a> to upload directly. You can still download the config below.`;
     uploadStatus.className = "record-status error";
     uploadStatus.querySelector("#upload-go-settings")?.addEventListener("click", (e) => {
       e.preventDefault();
@@ -560,10 +572,8 @@ btnUploadStepshots.addEventListener("click", async () => {
     return;
   }
 
-  uploadStatus.hidden = false;
-  uploadStatus.textContent = "Building bundle and uploading demo…";
-  uploadStatus.className = "record-status progress";
-  uploadResult.hidden = true;
+  resetUploadFeedback();
+  showUploadStatus("Preparing your demo upload…");
   btnUploadStepshots.setAttribute("disabled", "true");
 
   try {
@@ -576,7 +586,7 @@ btnUploadStepshots.addEventListener("click", async () => {
     });
 
     if (result?.ok && result.editorUrl) {
-      uploadStatus.hidden = true;
+      showUploadStatus("Upload complete. Opening your demo in the editor…", "success");
       uploadResult.hidden = false;
       uploadResult.innerHTML = `
         <p class="upload-success-text">Upload complete.</p>
@@ -587,12 +597,10 @@ btnUploadStepshots.addEventListener("click", async () => {
         chrome.tabs.create({ url: result.editorUrl });
       });
     } else {
-      uploadStatus.textContent = result?.error || "Upload failed";
-      uploadStatus.className = "record-status error";
+      showUploadStatus(result?.error || "Upload failed.", "error");
     }
   } catch {
-    uploadStatus.textContent = "Upload failed. Check your connection and try again.";
-    uploadStatus.className = "record-status error";
+    showUploadStatus("Upload failed. Check your connection and try again.", "error");
   } finally {
     btnUploadStepshots.removeAttribute("disabled");
   }
@@ -607,8 +615,7 @@ btnNew.addEventListener("click", () => {
   hideSetupStatus();
   inputTitle.value = "";
   inputDesc.value = "";
-  uploadResult.hidden = true;
-  uploadStatus.hidden = true;
+  resetUploadFeedback();
   showView("setup");
 });
 
@@ -652,6 +659,8 @@ btnSettingsBack.addEventListener("click", () => {
 chrome.runtime.onMessage.addListener((message: Message) => {
   if (message.type === "STATE_UPDATE") {
     renderState(message.state);
+  } else if (message.type === "UPLOAD_PROGRESS") {
+    showUploadStatus(message.message, message.stage === "finalize" ? "success" : "progress");
   }
 });
 

@@ -41,6 +41,15 @@ function broadcastState(): void {
   });
 }
 
+function broadcastUploadProgress(
+  stage: "bundle" | "upload" | "finalize",
+  message: string,
+): void {
+  chrome.runtime.sendMessage({ type: "UPLOAD_PROGRESS", stage, message }).catch(() => {
+    // Popup may not be open — ignore
+  });
+}
+
 // Send HUD update to the content script
 function sendHudUpdate(): void {
   if (!state.recordingTabId) return;
@@ -333,6 +342,7 @@ async function directUpload(
   apiKey: string,
 ): Promise<unknown> {
   try {
+    broadcastUploadProgress("bundle", "Packaging your recording into a .stepshot bundle…");
     const bundleBytes = buildBundle(recordingState, screenshots, recordingState.viewport);
 
     const formData = new FormData();
@@ -342,6 +352,7 @@ async function directUpload(
     }
     formData.append("bundle", new Blob([bundleBytes], { type: "application/zip" }), "bundle.stepshot");
 
+    broadcastUploadProgress("upload", "Uploading your demo to Stepshots…");
     const res = await fetch(`${stepshotsUrl}/api/demos/upload-bundle`, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -357,6 +368,7 @@ async function directUpload(
     }
 
     const data = await res.json();
+    broadcastUploadProgress("finalize", "Upload complete. Opening your demo in the editor…");
     return {
       ok: true,
       demoId: data.id,
