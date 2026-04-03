@@ -115,7 +115,246 @@ pub fn load_config(path: &Path) -> Result<StepshotsConfig, CliError> {
         return Err(CliError::Config("Config has no tutorials defined".into()));
     }
 
+    let errors = validate_config(&config);
+    if !errors.is_empty() {
+        let mut msg = String::from("Config validation failed:");
+        for e in &errors {
+            msg.push_str(&format!("\n  {}: {}", e.path, e.message));
+        }
+        return Err(CliError::Config(msg));
+    }
+
     Ok(config)
+}
+
+// ---------------------------------------------------------------------------
+// Config validation
+// ---------------------------------------------------------------------------
+
+const VALID_ACTIONS: &[&str] = &[
+    "click",
+    "type",
+    "key",
+    "scroll",
+    "scroll-to",
+    "hover",
+    "navigate",
+    "wait",
+    "select",
+];
+
+const VALID_POSITIONS: &[&str] = &["top", "bottom", "left", "right"];
+
+struct ConfigError {
+    path: String,
+    message: String,
+}
+
+fn validate_config(config: &StepshotsConfig) -> Vec<ConfigError> {
+    let mut errors = Vec::new();
+    for (key, tutorial) in &config.tutorials {
+        errors.extend(validate_tutorial(key, tutorial));
+    }
+    errors
+}
+
+fn validate_tutorial(key: &str, tutorial: &TutorialConfig) -> Vec<ConfigError> {
+    let mut errors = Vec::new();
+    let base = format!("tutorials.{key}");
+
+    if tutorial.url.is_empty() {
+        errors.push(ConfigError {
+            path: base.clone(),
+            message: "\"url\" must not be empty".into(),
+        });
+    }
+    if tutorial.steps.is_empty() {
+        errors.push(ConfigError {
+            path: base.clone(),
+            message: "\"steps\" must not be empty".into(),
+        });
+    }
+
+    for (i, step) in tutorial.steps.iter().enumerate() {
+        errors.extend(validate_step(&format!("{base}.steps[{i}]"), step));
+    }
+    errors
+}
+
+fn validate_step(path: &str, step: &StepConfig) -> Vec<ConfigError> {
+    let mut errors = Vec::new();
+
+    // Check action is valid
+    if !VALID_ACTIONS.contains(&step.action.as_str()) {
+        errors.push(ConfigError {
+            path: path.into(),
+            message: format!(
+                "unknown action \"{}\" (valid: {})",
+                step.action,
+                VALID_ACTIONS.join(", ")
+            ),
+        });
+        return errors; // skip field checks for unknown actions
+    }
+
+    // Action-specific required fields
+    match step.action.as_str() {
+        "click" | "hover" => {
+            if step.selector.is_none() {
+                errors.push(ConfigError {
+                    path: path.into(),
+                    message: format!("\"{}\" action requires \"selector\"", step.action),
+                });
+            }
+        }
+        "type" => {
+            if step.selector.is_none() {
+                errors.push(ConfigError {
+                    path: path.into(),
+                    message: "\"type\" action requires \"selector\"".into(),
+                });
+            }
+            if step.text.is_none() {
+                errors.push(ConfigError {
+                    path: path.into(),
+                    message: "\"type\" action requires \"text\"".into(),
+                });
+            }
+        }
+        "key" => {
+            if step.key.is_none() {
+                errors.push(ConfigError {
+                    path: path.into(),
+                    message: "\"key\" action requires \"key\"".into(),
+                });
+            }
+        }
+        "scroll-to" => {
+            if step.selector.is_none() && step.highlight_selector.is_none() {
+                errors.push(ConfigError {
+                    path: path.into(),
+                    message: "\"scroll-to\" requires \"selector\" or \"highlightSelector\"".into(),
+                });
+            }
+        }
+        "navigate" => {
+            if step.url.is_none() {
+                errors.push(ConfigError {
+                    path: path.into(),
+                    message: "\"navigate\" action requires \"url\"".into(),
+                });
+            }
+        }
+        "select" => {
+            if step.selector.is_none() {
+                errors.push(ConfigError {
+                    path: path.into(),
+                    message: "\"select\" action requires \"selector\"".into(),
+                });
+            }
+        }
+        _ => {} // scroll, wait — no strict requirements
+    }
+
+    // Validate overlay configs
+    for (i, h) in step.highlights.iter().enumerate() {
+        if let Some(ref pos) = h.position
+            && !VALID_POSITIONS.contains(&pos.as_str())
+        {
+            errors.push(ConfigError {
+                path: format!("{path}.highlights[{i}]"),
+                message: format!(
+                    "invalid position \"{pos}\" (valid: {})",
+                    VALID_POSITIONS.join(", ")
+                ),
+            });
+        }
+    }
+
+    for (i, b) in step.blur_regions.iter().enumerate() {
+        if b.selector.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.blurRegions[{i}]"),
+                message: "\"selector\" must not be empty".into(),
+            });
+        }
+    }
+
+    for (i, a) in step.arrows.iter().enumerate() {
+        if a.from_selector.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.arrows[{i}]"),
+                message: "\"fromSelector\" must not be empty".into(),
+            });
+        }
+        if a.to_selector.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.arrows[{i}]"),
+                message: "\"toSelector\" must not be empty".into(),
+            });
+        }
+    }
+
+    for (i, h) in step.hotspots.iter().enumerate() {
+        if h.selector.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.hotspots[{i}]"),
+                message: "\"selector\" must not be empty".into(),
+            });
+        }
+        if let Some(ref pos) = h.position
+            && !VALID_POSITIONS.contains(&pos.as_str())
+        {
+            errors.push(ConfigError {
+                path: format!("{path}.hotspots[{i}]"),
+                message: format!(
+                    "invalid position \"{pos}\" (valid: {})",
+                    VALID_POSITIONS.join(", ")
+                ),
+            });
+        }
+    }
+
+    for (i, p) in step.popups.iter().enumerate() {
+        if p.selector.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.popups[{i}]"),
+                message: "\"selector\" must not be empty".into(),
+            });
+        }
+        if p.body.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.popups[{i}]"),
+                message: "\"body\" must not be empty".into(),
+            });
+        }
+    }
+
+    for (i, c) in step.ctas.iter().enumerate() {
+        if c.selector.is_none() && (c.x.is_none() || c.y.is_none()) {
+            errors.push(ConfigError {
+                path: format!("{path}.ctas[{i}]"),
+                message: "CTA requires \"selector\" or both \"x\" and \"y\"".into(),
+            });
+        }
+        if c.label.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.ctas[{i}]"),
+                message: "\"label\" must not be empty".into(),
+            });
+        }
+    }
+
+    for (i, z) in step.zoom_regions.iter().enumerate() {
+        if z.selector.is_empty() {
+            errors.push(ConfigError {
+                path: format!("{path}.zoomRegions[{i}]"),
+                message: "\"selector\" must not be empty".into(),
+            });
+        }
+    }
+
+    errors
 }
 
 /// Generate a sample config.
@@ -252,5 +491,102 @@ mod tests {
         let expected = r#"{"text": "ci@test.com"}"#;
         assert_eq!(substitute_env_vars(input), expected);
         unsafe { remove_var("TEST_SUBST_EMAIL") };
+    }
+
+    fn make_step(action: &str) -> StepConfig {
+        StepConfig {
+            action: action.into(),
+            name: None,
+            selector: None,
+            text: None,
+            url: None,
+            key: None,
+            value: None,
+            delay: None,
+            scroll_x: None,
+            scroll_y: None,
+            highlight_selector: None,
+            highlights: vec![],
+            blur_regions: vec![],
+            arrows: vec![],
+            hotspots: vec![],
+            popups: vec![],
+            ctas: vec![],
+            zoom_regions: vec![],
+        }
+    }
+
+    #[test]
+    fn validate_unknown_action() {
+        let step = make_step("clck");
+        let errors = validate_step("test", &step);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("unknown action"));
+    }
+
+    #[test]
+    fn validate_click_missing_selector() {
+        let step = make_step("click");
+        let errors = validate_step("test", &step);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("requires \"selector\""));
+    }
+
+    #[test]
+    fn validate_click_valid() {
+        let mut step = make_step("click");
+        step.selector = Some("button".into());
+        let errors = validate_step("test", &step);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn validate_type_missing_both() {
+        let step = make_step("type");
+        let errors = validate_step("test", &step);
+        assert_eq!(errors.len(), 2);
+    }
+
+    #[test]
+    fn validate_navigate_missing_url() {
+        let step = make_step("navigate");
+        let errors = validate_step("test", &step);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("requires \"url\""));
+    }
+
+    #[test]
+    fn validate_invalid_position() {
+        let mut step = make_step("scroll");
+        step.highlights.push(HighlightConfig {
+            show_border: None,
+            callout: None,
+            icon: None,
+            position: Some("center".into()),
+            color: None,
+            arrow: None,
+        });
+        let errors = validate_step("test", &step);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("invalid position"));
+    }
+
+    #[test]
+    fn validate_scroll_no_errors() {
+        let step = make_step("scroll");
+        let errors = validate_step("test", &step);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn validate_empty_tutorial() {
+        let tutorial = TutorialConfig {
+            url: "".into(),
+            title: "Test".into(),
+            description: None,
+            steps: vec![],
+        };
+        let errors = validate_tutorial("test", &tutorial);
+        assert_eq!(errors.len(), 2); // empty url + empty steps
     }
 }

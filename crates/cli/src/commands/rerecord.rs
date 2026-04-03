@@ -2,7 +2,7 @@ use std::path::Path;
 
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
-use manifest::{BundleManifest, BundleManifestStep, HighlightEntry, StepConfig};
+use manifest::{BundleManifest, BundleManifestStep, HighlightEntry, StepConfig, Viewport};
 
 use crate::actions::execute_action;
 use crate::browser::Browser;
@@ -133,10 +133,10 @@ pub async fn run(
 
         let current_url = get_current_url(&browser).await;
 
-        // Carry highlights with updated bounds
+        // Carry highlights with updated bounds (skip off-screen)
         let highlights = old_step.highlights.as_ref().map(|anns| {
             anns.iter()
-                .map(|a| carry_highlight(a, new_bounds.clone()))
+                .filter_map(|a| carry_highlight(a, new_bounds.clone(), &manifest.viewport, i))
                 .collect()
         });
 
@@ -229,12 +229,26 @@ pub async fn run(
 }
 
 /// Carry over highlight metadata with updated element bounds.
+/// Returns `None` if the resolved bounds are entirely off-screen.
 fn carry_highlight(
     old: &HighlightEntry,
     new_bounds: Option<manifest::ElementBounds>,
-) -> HighlightEntry {
-    HighlightEntry {
-        bounds: new_bounds.unwrap_or_else(|| old.bounds.clone()),
+    viewport: &Viewport,
+    step_num: usize,
+) -> Option<HighlightEntry> {
+    let bounds = new_bounds.unwrap_or_else(|| old.bounds.clone());
+    if bounds.x + bounds.width <= 0.0
+        || bounds.y + bounds.height <= 0.0
+        || bounds.x >= viewport.width as f64
+        || bounds.y >= viewport.height as f64
+        || bounds.width <= 0.0
+        || bounds.height <= 0.0
+    {
+        eprintln!("  \u{26a0} Step {step_num}: highlight resolved off-screen, skipping");
+        return None;
+    }
+    Some(HighlightEntry {
+        bounds,
         callout: old.callout.clone(),
         position: old.position.clone(),
         arrow: old.arrow,
@@ -255,7 +269,7 @@ fn carry_highlight(
         animation: old.animation.clone(),
         delay: old.delay,
         duration: old.duration,
-    }
+    })
 }
 
 /// Validate that manifest steps have enough data for replay.

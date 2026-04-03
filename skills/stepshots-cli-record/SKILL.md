@@ -35,7 +35,7 @@ Ask the user what flow they want to capture. You need:
 - **Steps** — What to click, type, navigate to (in order)
 - **What to highlight** — Which elements deserve callouts or annotations
 
-If the user gives vague instructions like "demo the signup flow", use the **inspect** command or Playwright MCP tools to discover the page structure and selectors:
+If the user gives vague instructions like "demo the signup flow", use the **inspect** command to discover the page structure and selectors:
 
 ```bash
 stepshots inspect https://example.com
@@ -91,7 +91,8 @@ Each step has an `action` and typically a `selector`. Available actions:
 | `click` | `selector` | Click an element |
 | `type` | `selector`, `text` | Clear field and type text |
 | `key` | `key` | Press a key (Enter, Escape, Tab, etc.) |
-| `scroll` | `scrollX`, `scrollY` | Scroll the page or element |
+| `scroll` | `scrollX`, `scrollY` | Scroll the page or element (relative, uses `scrollBy`) |
+| `scroll-to` | `selector` | Scroll an element into view (`scrollIntoView` with `block:'center'`) |
 | `hover` | `selector` | Focus/hover an element |
 | `navigate` | `url` | Go to a URL (relative or absolute) |
 | `wait` | `selector` or `delay` | Wait for element to appear or delay in ms |
@@ -99,7 +100,7 @@ Each step has an `action` and typically a `selector`. Available actions:
 
 #### Annotations (Overlays)
 
-Add these to any step to annotate the screenshot taken BEFORE the action executes:
+Add these to any step to annotate the screenshot taken AFTER the step's action executes. Overlay selectors are resolved against the current viewport — elements must be visible on screen at that scroll/navigation position. Off-screen overlays are automatically skipped with a warning during recording.
 
 **Highlights** — Draw attention to an element with optional callout text:
 ```json
@@ -114,7 +115,9 @@ Add these to any step to annotate the screenshot taken BEFORE the action execute
   }]
 }
 ```
-The highlight targets the step's own `selector` by default. `position` can be `top`, `bottom`, `left`, or `right`.
+The highlight targets the step's own `selector` by default. Override with `highlightSelector` on the step to highlight a different element than the action target. `position` can be `top`, `bottom`, `left`, or `right`.
+
+**IMPORTANT: Only one highlight per step.** The CLI only resolves `highlights[0]` — additional entries are ignored. Highlights do NOT have their own `selector` field; they always use the step's `selector` (or `highlightSelector`). To annotate multiple elements in one step, use the highlight for the primary element and hotspots or popups for secondary elements (these DO have their own `selector` fields).
 
 **Blur Regions** — Redact sensitive content:
 ```json
@@ -182,6 +185,34 @@ Follow these rules when generating configs:
 10. **One tutorial per feature** — Don't cram multiple features into one demo. Create separate tutorial keys.
 
 11. **Descriptive tutorial keys** — Use kebab-case keys that describe the flow: `signup-flow`, `create-first-project`, `invite-team-member`.
+
+12. **Overlays must target visible elements** — Highlights, hotspots, and other overlays are only recorded when their target element is visible in the viewport at that step. If a highlight targets an element that has scrolled off-screen, it will be skipped with a warning. Make sure scroll steps bring target elements into view before annotating them.
+
+13. **One highlight per scroll section** — When scrolling through a long page, each scroll step should highlight elements visible at that scroll position. Don't add a highlight targeting an element from a previous scroll position — it won't be visible and will be skipped.
+
+14. **Callout position matters** — Choose `position` (`top`, `bottom`, `left`, `right`) based on where there's space around the target element. Elements near edges may have their callout auto-flipped to the opposite side. Avoid `left` position for elements near the left edge.
+
+15. **Keep callout text short (5-8 words)** — Long callouts get squeezed into narrow columns, especially near viewport edges. "Search docs with ⌘K" beats "Instant search across all docs — find any topic in seconds with ⌘K". If you need more text, use a `popup` instead (it has a fixed `width` parameter).
+
+16. **`scroll-to` skips the delay** — For scroll actions, the step's `delay` is skipped because the CLI captures transition frames (~600ms) instead. If the scroll is long and overlays resolve off-screen, split into two steps: a bare `scroll-to` step (no overlays), then a `wait` step with `delay` and the overlays.
+
+17. **Prefer `scroll-to` over `scroll`** — `scroll` uses relative `scrollBy` with pixel offsets that break when page layout changes. `scroll-to` uses `scrollIntoView` on a selector, which adapts to any layout. Use `scroll` only when you need precise pixel control.
+
+18. **Prefer `navigate` over `click` for nav links** — Clicking nav links can fail if the element is obscured after scrolling. `navigate` with a relative URL is more reliable for page transitions.
+
+19. **Use section IDs for scroll targets** — When scrolling through a long page, target stable `#id` selectors (e.g., `#features`, `#pricing`) rather than class-based selectors that may break with Tailwind/CSS changes.
+
+20. **Record clean, polish in dashboard** — For marketing-quality demos, record screenshots with minimal CLI overlays, then upload and use the visual overlay editor in the dashboard to place annotations precisely. The CLI is best for capturing the flow; the editor is best for making it look polished.
+
+21. **Add a `wait` step at the start** — Before any actions, add a `wait` step with a stable selector (e.g. `"selector": "body"` or a hero element) and a `delay` of 1000-1500ms. This ensures the page is fully rendered before the first screenshot. Dynamic pages (SPAs, lazy-loaded content) need this especially.
+
+22. **Preview → dry-run → record** — Follow this workflow: `stepshots preview` (visible browser, verify flow works) → `stepshots record --dry-run` (validate config without Chrome) → `stepshots record` (final recording). Don't skip straight to record.
+
+23. **Scope selectors with context** — When a page has multiple similar elements (e.g. several "Submit" buttons), scope selectors to their container: use `#signup-form button[type="submit"]` instead of just `button[type="submit"]`. This prevents matching the wrong element.
+
+24. **Use `rerecord` when UI changes** — When the target site updates its design, run `stepshots rerecord output/tutorial.stepshot` instead of re-recording from scratch. This replays all actions on the current version while preserving your overlay annotations, saving manual annotation work.
+
+25. **Add delay for page transitions** — Steps that trigger navigation (click on a link, form submit) need `"delay": 1500` or higher to let the new page fully load before the screenshot is captured. Default 500ms is too fast for most page transitions.
 
 ### Phase 4: Record
 
@@ -313,7 +344,6 @@ Here's a well-structured demo config for a SaaS signup flow:
 When the user doesn't provide selectors, discover them:
 
 1. **Use `stepshots inspect`** for an interactive element browser
-2. **Use Playwright MCP** (`browser_snapshot`) to get a DOM snapshot
-3. **Prefer stability**: `#id` > `[data-testid]` > `[aria-label]` > `.class` > CSS path
-4. **Test selectors** in browser devtools: `document.querySelector('your-selector')`
-5. **Avoid**: Selectors with dynamic IDs, deeply nested paths, or nth-child chains
+2. **Prefer stability**: `#id` > `[data-testid]` > `[aria-label]` > `.class` > CSS path
+3. **Test selectors** in browser devtools: `document.querySelector('your-selector')`
+4. **Avoid**: Selectors with dynamic IDs, deeply nested paths, or nth-child chains

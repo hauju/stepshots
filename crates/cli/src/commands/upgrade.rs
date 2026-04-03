@@ -15,10 +15,7 @@ pub async fn run(force: bool, check_only: bool) -> Result<(), CliError> {
     let current = Version::parse(CURRENT_VERSION)
         .map_err(|e| CliError::Upgrade(format!("Failed to parse current version: {e}")))?;
 
-    println!(
-        "  {} Checking for updates...",
-        style("●").dim(),
-    );
+    println!("  {} Checking for updates...", style("●").dim(),);
 
     let latest_str = match fetch_latest_version().await {
         Ok(v) => v,
@@ -38,8 +35,11 @@ pub async fn run(force: bool, check_only: bool) -> Result<(), CliError> {
         }
     };
 
-    let latest = Version::parse(&latest_str)
-        .map_err(|e| CliError::Upgrade(format!("Failed to parse latest version '{latest_str}': {e}")))?;
+    let latest = Version::parse(&latest_str).map_err(|e| {
+        CliError::Upgrade(format!(
+            "Failed to parse latest version '{latest_str}': {e}"
+        ))
+    })?;
 
     if current >= latest && !force {
         println!(
@@ -87,7 +87,13 @@ async fn do_install(current: &str, latest: Option<&str>) -> Result<(), CliError>
     spinner.enable_steady_tick(Duration::from_millis(100));
 
     let output = tokio::process::Command::new("cargo")
-        .args(["install", "--git", CARGO_INSTALL_URL, PACKAGE_NAME, "--force"])
+        .args([
+            "install",
+            "--git",
+            CARGO_INSTALL_URL,
+            PACKAGE_NAME,
+            "--force",
+        ])
         .output()
         .await
         .map_err(|e| CliError::Upgrade(format!("Failed to run cargo install: {e}")))?;
@@ -96,7 +102,9 @@ async fn do_install(current: &str, latest: Option<&str>) -> Result<(), CliError>
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CliError::Upgrade(format!("cargo install failed:\n{stderr}")));
+        return Err(CliError::Upgrade(format!(
+            "cargo install failed:\n{stderr}"
+        )));
     }
 
     println!(

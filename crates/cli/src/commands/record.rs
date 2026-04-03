@@ -166,13 +166,13 @@ pub async fn record_tutorial(
             step_ctas,
             step_zooms,
         ) = (
-            resolve_highlight(&browser, step).await?,
-            resolve_blur_regions(&browser, step).await?,
-            resolve_arrows(&browser, step).await?,
-            resolve_hotspots(&browser, step).await?,
-            resolve_popups(&browser, step).await?,
-            resolve_ctas(&browser, step).await?,
-            resolve_zoom_regions(&browser, step).await?,
+            resolve_highlight(&browser, step, viewport, i + 1).await?,
+            resolve_blur_regions(&browser, step, viewport, i + 1).await?,
+            resolve_arrows(&browser, step, viewport, i + 1).await?,
+            resolve_hotspots(&browser, step, viewport, i + 1).await?,
+            resolve_popups(&browser, step, viewport, i + 1).await?,
+            resolve_ctas(&browser, step, viewport, i + 1).await?,
+            resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
         );
 
         // Screenshot after action
@@ -263,10 +263,27 @@ pub async fn record_tutorial(
     Ok(())
 }
 
+/// Returns true if bounds are at least partially visible within the viewport.
+fn is_bounds_visible(bounds: &ElementBounds, viewport: &Viewport) -> bool {
+    bounds.x + bounds.width > 0.0
+        && bounds.y + bounds.height > 0.0
+        && bounds.x < viewport.width as f64
+        && bounds.y < viewport.height as f64
+        && bounds.width > 0.0
+        && bounds.height > 0.0
+}
+
+/// Returns true if a point is within the viewport.
+fn is_point_visible(x: f64, y: f64, viewport: &Viewport) -> bool {
+    x >= 0.0 && y >= 0.0 && x <= viewport.width as f64 && y <= viewport.height as f64
+}
+
 /// Resolve highlight config into a HighlightEntry with element bounds.
 async fn resolve_highlight(
     browser: &Browser,
     step: &manifest::StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
 ) -> Result<Option<HighlightEntry>, CliError> {
     if step.highlights.is_empty() {
         return Ok(None);
@@ -284,6 +301,14 @@ async fn resolve_highlight(
         width: 0.0,
         height: 0.0,
     });
+    if !is_bounds_visible(&bounds, viewport) {
+        let sel_str = sel.map(|s| s.as_str()).unwrap_or("(none)");
+        eprintln!(
+            "  \u{26a0} Step {step_num} \"{}\": highlight selector \"{sel_str}\" resolved off-screen, skipping",
+            step.name.as_deref().unwrap_or("")
+        );
+        return Ok(None);
+    }
     Ok(Some(HighlightEntry {
         bounds,
         callout: ann_cfg.callout.clone(),
@@ -308,11 +333,21 @@ async fn resolve_highlight(
 async fn resolve_blur_regions(
     browser: &Browser,
     step: &StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
 ) -> Result<Vec<ElementBounds>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.blur_regions {
         if let Some(bounds) = browser.get_bounds(&cfg.selector).await? {
-            results.push(bounds);
+            if is_bounds_visible(&bounds, viewport) {
+                results.push(bounds);
+            } else {
+                eprintln!(
+                    "  \u{26a0} Step {step_num} \"{}\": blur selector \"{}\" resolved off-screen, skipping",
+                    step.name.as_deref().unwrap_or(""),
+                    cfg.selector
+                );
+            }
         }
     }
     Ok(results)
@@ -321,12 +356,23 @@ async fn resolve_blur_regions(
 async fn resolve_arrows(
     browser: &Browser,
     step: &StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
 ) -> Result<Vec<ArrowPointer>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.arrows {
         let from = browser.get_element_center(&cfg.from_selector).await?;
         let to = browser.get_element_center(&cfg.to_selector).await?;
         if let (Some(from), Some(to)) = (from, to) {
+            if !is_point_visible(from.x, from.y, viewport)
+                || !is_point_visible(to.x, to.y, viewport)
+            {
+                eprintln!(
+                    "  \u{26a0} Step {step_num} \"{}\": arrow endpoint resolved off-screen, skipping",
+                    step.name.as_deref().unwrap_or("")
+                );
+                continue;
+            }
             results.push(ArrowPointer {
                 from,
                 to,
@@ -343,10 +389,20 @@ async fn resolve_arrows(
 async fn resolve_hotspots(
     browser: &Browser,
     step: &StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
 ) -> Result<Vec<HotspotIndicator>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.hotspots {
         if let Some(center) = browser.get_element_center(&cfg.selector).await? {
+            if !is_point_visible(center.x, center.y, viewport) {
+                eprintln!(
+                    "  \u{26a0} Step {step_num} \"{}\": hotspot selector \"{}\" resolved off-screen, skipping",
+                    step.name.as_deref().unwrap_or(""),
+                    cfg.selector
+                );
+                continue;
+            }
             results.push(HotspotIndicator {
                 x: center.x,
                 y: center.y,
@@ -364,10 +420,20 @@ async fn resolve_hotspots(
 async fn resolve_popups(
     browser: &Browser,
     step: &StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
 ) -> Result<Vec<PopupIndicator>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.popups {
         if let Some(center) = browser.get_element_center(&cfg.selector).await? {
+            if !is_point_visible(center.x, center.y, viewport) {
+                eprintln!(
+                    "  \u{26a0} Step {step_num} \"{}\": popup selector \"{}\" resolved off-screen, skipping",
+                    step.name.as_deref().unwrap_or(""),
+                    cfg.selector
+                );
+                continue;
+            }
             results.push(PopupIndicator {
                 x: center.x,
                 y: center.y,
@@ -390,7 +456,12 @@ async fn resolve_popups(
     Ok(results)
 }
 
-async fn resolve_ctas(browser: &Browser, step: &StepConfig) -> Result<Vec<CtaButton>, CliError> {
+async fn resolve_ctas(
+    browser: &Browser,
+    step: &StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
+) -> Result<Vec<CtaButton>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.ctas {
         let (x, y) = if let Some(ref sel) = cfg.selector {
@@ -404,6 +475,13 @@ async fn resolve_ctas(browser: &Browser, step: &StepConfig) -> Result<Vec<CtaBut
         } else {
             continue;
         };
+        if !is_point_visible(x, y, viewport) {
+            eprintln!(
+                "  \u{26a0} Step {step_num} \"{}\": CTA resolved off-screen, skipping",
+                step.name.as_deref().unwrap_or("")
+            );
+            continue;
+        }
         results.push(CtaButton {
             x,
             y,
@@ -427,16 +505,26 @@ async fn resolve_ctas(browser: &Browser, step: &StepConfig) -> Result<Vec<CtaBut
 async fn resolve_zoom_regions(
     browser: &Browser,
     step: &StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
 ) -> Result<Vec<ZoomRegion>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.zoom_regions {
         if let Some(bounds) = browser.get_bounds(&cfg.selector).await? {
-            results.push(ZoomRegion {
-                bounds,
-                magnification: cfg.magnification,
-                delay: cfg.delay,
-                duration: cfg.duration,
-            });
+            if is_bounds_visible(&bounds, viewport) {
+                results.push(ZoomRegion {
+                    bounds,
+                    magnification: cfg.magnification,
+                    delay: cfg.delay,
+                    duration: cfg.duration,
+                });
+            } else {
+                eprintln!(
+                    "  \u{26a0} Step {step_num} \"{}\": zoom selector \"{}\" resolved off-screen, skipping",
+                    step.name.as_deref().unwrap_or(""),
+                    cfg.selector
+                );
+            }
         }
     }
     Ok(results)
