@@ -6,6 +6,9 @@ export function generateStepSummary(step: RecordedStep): string {
   if (meta?.sensitive) {
     return `Sensitive input (${meta.sensitiveType ?? "password"}) — value hidden`;
   }
+  if (meta?.captureOnly) {
+    return "Capture screen";
+  }
 
   switch (step.action) {
     case "click": {

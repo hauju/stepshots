@@ -122,6 +122,14 @@
   background: rgba(239, 68, 68, 0.2);
 }
 
+.rc-hud-btn-capture {
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.rc-hud-btn-capture:hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+
 .rc-hud-btn-icon {
   font-size: 10px;
 }

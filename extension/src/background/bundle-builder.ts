@@ -1,5 +1,5 @@
 import { zipSync } from "fflate";
-import type { RecordingState, Viewport } from "../types";
+import type { ElementBounds, Highlight, RecordingState, Viewport } from "../types";
 
 /** Convert a data URL (image/webp or image/png) to a Uint8Array. */
 function dataUrlToBytes(dataUrl: string): Uint8Array {
@@ -15,12 +15,11 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 /**
  * Build a .stepshot bundle zip from recorded state and screenshots.
  *
- * Screenshots map: stepId -> data URL. The special key "__initial__" holds
- * the screenshot taken before any action (step 0).
+ * Screenshots map: stepId -> data URL for each recorded step.
  *
- * Highlights are placed on the PRE-action screenshot:
- * - steps/0.jpg (initial) gets state.steps[0]'s highlight
- * - steps/N.jpg (after step N-1's action) gets state.steps[N]'s highlight
+ * Each recorded step maps 1:1 to a demo step and carries its own screenshot
+ * plus any automatically captured target highlight. Click steps use a pre-action
+ * screenshot so the highlight matches the scene where the click happens.
  */
 export function buildBundle(
   state: RecordingState,
@@ -30,28 +29,7 @@ export function buildBundle(
   const files: Record<string, Uint8Array> = {};
   const manifestSteps: ManifestStep[] = [];
 
-  // Step 0: initial screenshot with first step's highlight
-  const initialDataUrl = screenshots.get("__initial__");
-  if (initialDataUrl) {
-    files["steps/0.jpg"] = dataUrlToBytes(initialDataUrl);
-
-    const firstStep = state.steps[0];
-    const highlight = firstStep?.highlight ?? undefined;
-
-    manifestSteps.push({
-      file: "steps/0.jpg",
-      ...(highlight?.callout ? {
-        highlights: [{
-          callout: highlight.callout,
-          position: highlight.position ?? "bottom",
-          arrow: highlight.arrow,
-        }],
-      } : {}),
-    });
-  }
-
-  // Each recorded step produces a screenshot taken AFTER its action.
-  // The annotation for the NEXT step goes on this screenshot.
+  // Each recorded step produces one screenshot for its own scene.
   for (let i = 0; i < state.steps.length; i++) {
     const step = state.steps[i];
     const dataUrl = screenshots.get(step.id);
@@ -64,12 +42,11 @@ export function buildBundle(
     const fileName = `steps/${fileIndex}.jpg`;
     files[fileName] = dataUrlToBytes(dataUrl);
 
-    // Next step's highlight goes on this screenshot
-    const nextStep = state.steps[i + 1];
-    const nextHighlight = nextStep?.highlight ?? undefined;
+    const stepHighlight = buildManifestHighlight(step.targetBounds, step.highlight);
 
     const manifestStep: ManifestStep = {
       file: fileName,
+      ...(step.meta?.captureOnly ? { name: "Capture screen" } : {}),
       action: step.action,
       url: step.url,
       selector: step.selector,
@@ -80,12 +57,8 @@ export function buildBundle(
       value: step.value,
     };
 
-    if (nextHighlight?.callout) {
-      manifestStep.highlights = [{
-        callout: nextHighlight.callout,
-        position: nextHighlight.position ?? "bottom",
-        arrow: nextHighlight.arrow,
-      }];
+    if (stepHighlight) {
+      manifestStep.highlights = [stepHighlight];
     }
 
     manifestSteps.push(manifestStep);
@@ -94,6 +67,8 @@ export function buildBundle(
   const manifest = {
     version: 1,
     viewport: { width: viewport.width, height: viewport.height },
+    baseUrl: state.baseUrl,
+    startPath: state.startPath,
     steps: manifestSteps,
   };
 
@@ -104,13 +79,19 @@ export function buildBundle(
 }
 
 interface ManifestHighlight {
+  bounds: ElementBounds;
   callout?: string;
   position?: string;
   arrow?: boolean;
+  color?: string;
+  borderWidth?: number;
+  icon?: string;
+  isClickTarget?: boolean;
 }
 
 interface ManifestStep {
   file: string;
+  name?: string;
   action?: string;
   url?: string;
   selector?: string;
@@ -120,4 +101,24 @@ interface ManifestStep {
   scrollY?: number;
   value?: string;
   highlights?: ManifestHighlight[];
+}
+
+function buildManifestHighlight(
+  bounds?: ElementBounds,
+  highlight?: Highlight,
+): ManifestHighlight | undefined {
+  if (!bounds) {
+    return undefined;
+  }
+
+  return {
+    bounds,
+    ...(highlight?.callout ? { callout: highlight.callout } : {}),
+    position: highlight?.position ?? "bottom",
+    arrow: highlight?.arrow ?? false,
+    color: highlight?.color ?? "#3b82f6",
+    borderWidth: highlight?.showBorder === false ? 0 : 2,
+    ...(highlight?.icon ? { icon: highlight.icon } : {}),
+    isClickTarget: true,
+  };
 }

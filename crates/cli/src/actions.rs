@@ -167,9 +167,6 @@ pub async fn execute_action(
             el.scroll_into_view()
                 .await
                 .map_err(|e| CliError::Action(format!("Scroll into view failed: {e}")))?;
-            el.focus().await.map_err(|e| {
-                CliError::Action(format!("Hover/focus failed on '{selector}': {e}"))
-            })?;
         }
         "navigate" => {
             let url = step

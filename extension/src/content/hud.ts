@@ -44,6 +44,9 @@ export function showHud(): void {
       </div>
       <div class="rc-hud-last-action"></div>
       <div class="rc-hud-controls">
+        <button class="rc-hud-btn rc-hud-btn-capture" title="Capture screen (Alt+Shift+S)">
+          <span class="rc-hud-btn-icon">&#x2398;</span> Capture
+        </button>
         <button class="rc-hud-btn rc-hud-btn-pause" title="Pause recording">
           <span class="rc-hud-btn-icon">&#x23F8;</span> Pause
         </button>
@@ -59,6 +62,11 @@ export function showHud(): void {
   // Drag behavior
   const dragHandle = hudEl.querySelector(".rc-hud-drag") as HTMLElement;
   dragHandle.addEventListener("pointerdown", onDragStart);
+
+  // Pause/Resume button
+  hudEl.querySelector(".rc-hud-btn-capture")!.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "CAPTURE_SCREEN" }).catch(() => {});
+  });
 
   // Pause/Resume button
   hudEl.querySelector(".rc-hud-btn-pause")!.addEventListener("click", () => {

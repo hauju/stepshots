@@ -254,6 +254,8 @@ pub async fn record_tutorial(
     let manifest = BundleManifest {
         version: 1,
         viewport: viewport.clone(),
+        base_url: Some(config.base_url.clone()),
+        start_path: Some(tutorial.url.clone()),
         format: config.format.clone(),
         steps: manifest_steps,
     };

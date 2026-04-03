@@ -1,4 +1,4 @@
-import type { RecordedStep, StepAction, StepMeta } from "../types";
+import type { ElementBounds, RecordedStep, StepAction, StepMeta } from "../types";
 import { generateSelector } from "./selector";
 import { showToast } from "./popover";
 
@@ -19,8 +19,6 @@ export function activate(): void {
   document.addEventListener("input", onInput, { capture: true });
   document.addEventListener("change", onChange, { capture: true });
   document.addEventListener("keydown", onKeyDown, { capture: true });
-  document.addEventListener("scroll", onScroll, { capture: true, passive: true });
-  patchHistory();
 }
 
 export function deactivate(): void {
@@ -32,8 +30,6 @@ export function deactivate(): void {
   document.removeEventListener("input", onInput, { capture: true });
   document.removeEventListener("change", onChange, { capture: true });
   document.removeEventListener("keydown", onKeyDown, { capture: true });
-  document.removeEventListener("scroll", onScroll, { capture: true });
-  unpatchHistory();
 }
 
 export function pause(): void {
@@ -108,12 +104,25 @@ function captureElementMeta(el: Element): StepMeta {
 
 // --- Click ---
 function onClickCapture(e: MouseEvent): void {
+  void handleClickCapture(e);
+}
+
+async function handleClickCapture(e: MouseEvent): Promise<void> {
   if (!active || paused) return;
+  if (!e.isTrusted) return;
   const target = e.target as Element;
   if (!target) return;
   flushTypeBuffer();
 
   const step = createStep("click", target);
+  const interceptedLink = findInterceptableLink(target, e);
+  if (interceptedLink) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    e.stopPropagation();
+  }
+
+  await chrome.runtime.sendMessage({ type: "CAPTURE_STEP_SCREENSHOT", stepId: step.id }).catch(() => {});
 
   // For sensitive fields, strip any value data
   if (step.meta?.sensitive) {
@@ -122,6 +131,10 @@ function onClickCapture(e: MouseEvent): void {
     recordStep(step, target, "Sensitive — value not recorded");
   } else {
     recordStep(step, target);
+  }
+
+  if (interceptedLink) {
+    interceptedLink.click();
   }
 }
 
@@ -177,6 +190,20 @@ function onChange(e: Event): void {
 // --- Key (non-printable) ---
 function onKeyDown(e: KeyboardEvent): void {
   if (!active || paused) return;
+  if (e.altKey && e.shiftKey && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    e.stopPropagation();
+    flushTypeBuffer();
+    chrome.runtime.sendMessage({ type: "CAPTURE_SCREEN" }).catch(() => {});
+    const step: RecordedStep = {
+      id: crypto.randomUUID(),
+      action: "wait",
+      meta: { captureOnly: true },
+      timestamp: Date.now(),
+    };
+    showToast(step, document.body, "Screen captured");
+    return;
+  }
   const nonPrintable = ["Enter", "Escape", "Tab", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
   if (!nonPrintable.includes(e.key) && !e.metaKey && !e.ctrlKey) return;
 
@@ -207,76 +234,6 @@ function onKeyDown(e: KeyboardEvent): void {
   sendStep(step);
 }
 
-// --- Scroll ---
-let scrollTimer: number | null = null;
-let scrollStartX = 0;
-let scrollStartY = 0;
-
-function onScroll(_e: Event): void {
-  if (!active || paused) return;
-  if (scrollTimer === null) {
-    scrollStartX = window.scrollX;
-    scrollStartY = window.scrollY;
-  } else {
-    clearTimeout(scrollTimer);
-  }
-
-  scrollTimer = window.setTimeout(() => {
-    const deltaX = window.scrollX - scrollStartX;
-    const deltaY = window.scrollY - scrollStartY;
-    scrollTimer = null;
-
-    if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10) return;
-
-    const step: RecordedStep = {
-      id: crypto.randomUUID(),
-      action: "scroll",
-      scrollX: Math.round(deltaX),
-      scrollY: Math.round(deltaY),
-      timestamp: Date.now(),
-    };
-    sendStep(step);
-  }, 300);
-}
-
-// --- SPA navigation detection ---
-const originalPushState = history.pushState.bind(history);
-const originalReplaceState = history.replaceState.bind(history);
-
-function patchHistory(): void {
-  history.pushState = function (...args) {
-    originalPushState(...args);
-    onSpaNavigation();
-  };
-  history.replaceState = function (...args) {
-    originalReplaceState(...args);
-    onSpaNavigation();
-  };
-  window.addEventListener("popstate", onSpaNavigation);
-}
-
-function unpatchHistory(): void {
-  history.pushState = originalPushState;
-  history.replaceState = originalReplaceState;
-  window.removeEventListener("popstate", onSpaNavigation);
-}
-
-let lastSpaUrl = "";
-function onSpaNavigation(): void {
-  if (paused) return;
-  const currentUrl = location.pathname + location.search;
-  if (currentUrl === lastSpaUrl) return;
-  lastSpaUrl = currentUrl;
-
-  const step: RecordedStep = {
-    id: crypto.randomUUID(),
-    action: "navigate",
-    url: currentUrl,
-    timestamp: Date.now(),
-  };
-  sendStep(step);
-}
-
 // --- Helpers ---
 
 function createStep(action: StepAction, el: Element): RecordedStep {
@@ -284,8 +241,22 @@ function createStep(action: StepAction, el: Element): RecordedStep {
     id: crypto.randomUUID(),
     action,
     selector: generateSelector(el),
+    targetBounds: captureTargetBounds(el),
     meta: captureElementMeta(el),
     timestamp: Date.now(),
+  };
+}
+
+function captureTargetBounds(el: Element): ElementBounds | undefined {
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return undefined;
+  }
+  return {
+    x: Math.round(rect.left),
+    y: Math.round(rect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
   };
 }
 
@@ -306,4 +277,40 @@ function isTextInput(el: Element): boolean {
   }
   if ((el as HTMLElement).isContentEditable) return true;
   return false;
+}
+
+function findInterceptableLink(target: Element, e: MouseEvent): HTMLAnchorElement | null {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+    return null;
+  }
+
+  const anchor = target.closest("a[href]") as HTMLAnchorElement | null;
+  if (!anchor) {
+    return null;
+  }
+
+  if (anchor.hasAttribute("download")) {
+    return null;
+  }
+
+  const targetAttr = anchor.getAttribute("target");
+  if (targetAttr && targetAttr !== "_self") {
+    return null;
+  }
+
+  const href = anchor.href;
+  if (!href) {
+    return null;
+  }
+
+  try {
+    const url = new URL(href, location.href);
+    if (!/^https?:$/.test(url.protocol)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return anchor;
 }

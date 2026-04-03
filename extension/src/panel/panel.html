@@ -23,7 +23,7 @@
       <div class="setup-guidance-body">
         <p class="guidance-heading">What gets recorded</p>
         <ul>
-          <li>Clicks, typing, navigation, scrolling</li>
+          <li>Clicks, typing, and captured screens</li>
           <li>Keyboard shortcuts and dropdown selections</li>
         </ul>
         <p class="guidance-heading">Privacy</p>
@@ -48,11 +48,12 @@
         <span class="recording-dot" id="recording-dot"></span>
         <span id="recording-status-text">Recording</span>
       </div>
-      <span id="step-count" class="badge">0 steps</span>
+      <span id="step-count" class="badge">0 actions</span>
     </div>
     <p id="base-url" class="meta"></p>
     <div id="step-list" class="step-list"></div>
     <div class="recording-controls">
+      <button id="btn-capture" class="btn" title="Capture screen without an action (Alt+Shift+S)">Capture Screen</button>
       <button id="btn-pause" class="btn">Pause</button>
       <button id="btn-stop" class="btn btn-danger">Stop Recording</button>
     </div>

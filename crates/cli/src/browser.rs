@@ -205,7 +205,6 @@ impl Browser {
             _ => Ok(None),
         }
     }
-
     /// Get a reference to the underlying CDP page.
     pub fn page(&self) -> &Page {
         &self.page

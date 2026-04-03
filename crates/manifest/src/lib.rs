@@ -488,6 +488,10 @@ pub struct BundleManifest {
     pub version: u32,
     pub viewport: Viewport,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<DemoFormat>,
     pub steps: Vec<BundleManifestStep>,
 }

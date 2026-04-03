@@ -17,6 +17,13 @@ export interface Highlight {
   color?: string;
 }
 
+export interface ElementBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface StepConfig {
   action: StepAction;
   selector?: string;
@@ -63,6 +70,7 @@ export interface StepMeta {
   inputType?: string;
   sensitive?: boolean;
   sensitiveType?: string;
+  captureOnly?: boolean;
 }
 
 export interface RecordedStep {
@@ -76,6 +84,7 @@ export interface RecordedStep {
   scrollX?: number;
   scrollY?: number;
   highlight?: Highlight;
+  targetBounds?: ElementBounds;
   meta?: StepMeta;
   timestamp: number;
 }

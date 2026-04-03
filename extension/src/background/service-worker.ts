@@ -196,9 +196,6 @@ async function handleMessage(
       await saveState();
       broadcastState();
 
-      // Capture initial screenshot (before any user action)
-      captureScreenshot("__initial__", 300);
-
       return state;
     }
 
@@ -242,6 +239,32 @@ async function handleMessage(
       return state;
     }
 
+    case "CAPTURE_SCREEN": {
+      if (!state.isRecording || state.isPaused) return state;
+
+      const step = {
+        id: crypto.randomUUID(),
+        action: "wait" as const,
+        meta: { captureOnly: true },
+        timestamp: Date.now(),
+      };
+
+      state.steps.push(step);
+      await saveState();
+      broadcastState();
+      sendHudUpdate();
+
+      captureScreenshot(step.id, 100);
+      return state;
+    }
+
+    case "CAPTURE_STEP_SCREENSHOT": {
+      if (!state.isRecording || state.isPaused) return state;
+      if (state.recordingTabId && sender?.tab?.id !== state.recordingTabId) return state;
+      await captureScreenshot(message.stepId, 0);
+      return { ok: true };
+    }
+
     case "STEP_RECORDED": {
       if (!state.isRecording || state.isPaused) return;
       // Only accept steps from the recording tab
@@ -251,12 +274,10 @@ async function handleMessage(
       broadcastState();
       sendHudUpdate();
 
-      // Capture screenshot after the action settles
-      // Skip navigate steps — onUpdated will capture after page load completes
-      if (message.step.action !== "navigate") {
-        const delay = message.step.action === "scroll" ? 300
-          : message.step.action === "type" ? 100
-          : 200;
+      // Capture screenshot after the action settles when the content script
+      // did not already request a pre-action capture for this step.
+      if (!screenshots.has(message.step.id)) {
+        const delay = message.step.action === "type" ? 100 : 200;
         captureScreenshot(message.step.id, delay);
       }
 
@@ -378,44 +399,6 @@ async function directUpload(
     return { error: `Upload failed: ${err}` };
   }
 }
-
-// Track navigation for navigate steps
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
-  if (!state.isRecording || state.isPaused || changeInfo.status !== "complete") return;
-
-  // Only track navigation in the recording tab
-  if (state.recordingTabId && tabId !== state.recordingTabId) return;
-
-  const tab = await getActiveTab();
-  if (!tab || tab.id !== tabId || !tab.url) return;
-  if (isRestrictedUrl(tab.url)) return;
-
-  const url = new URL(tab.url);
-  const fullPath = url.pathname + url.search;
-
-  // Skip if this is the start URL or last step was already this navigate
-  if (fullPath === state.startPath && state.steps.length === 0) return;
-
-  const lastStep = state.steps[state.steps.length - 1];
-  if (lastStep?.action === "navigate" && lastStep.url === fullPath) return;
-
-  // Only add navigate step if the origin matches (same site)
-  if (url.origin === state.baseUrl) {
-    const stepId = crypto.randomUUID();
-    state.steps.push({
-      id: stepId,
-      action: "navigate",
-      url: fullPath,
-      timestamp: Date.now(),
-    });
-    await saveState();
-    broadcastState();
-    sendHudUpdate();
-
-    // Capture screenshot after navigation completes
-    captureScreenshot(stepId, 500);
-  }
-});
 
 // Open side panel when extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });

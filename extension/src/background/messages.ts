@@ -20,6 +20,10 @@ export interface ResumeRecordingMessage {
   type: "RESUME_RECORDING";
 }
 
+export interface CaptureScreenMessage {
+  type: "CAPTURE_SCREEN";
+}
+
 export interface GetStateMessage {
   type: "GET_STATE";
 }
@@ -78,6 +82,11 @@ export interface StepRecordedMessage {
   step: RecordedStep;
 }
 
+export interface CaptureStepScreenshotMessage {
+  type: "CAPTURE_STEP_SCREENSHOT";
+  stepId: string;
+}
+
 // Background -> Content Script
 export interface ActivateContentScriptMessage {
   type: "ACTIVATE_CONTENT_SCRIPT";
@@ -132,6 +141,7 @@ export type Message =
   | StopRecordingMessage
   | PauseRecordingMessage
   | ResumeRecordingMessage
+  | CaptureScreenMessage
   | GetStateMessage
   | UpdateStepMessage
   | DeleteStepMessage
@@ -142,6 +152,7 @@ export type Message =
   | SaveSettingsMessage
   | UploadToStepshotsMessage
   | StepRecordedMessage
+  | CaptureStepScreenshotMessage
   | ActivateContentScriptMessage
   | DeactivateContentScriptMessage
   | PauseContentScriptMessage

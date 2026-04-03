@@ -175,6 +175,8 @@ pub async fn run(
     let new_manifest = BundleManifest {
         version: manifest.version,
         viewport: manifest.viewport,
+        base_url: manifest.base_url,
+        start_path: manifest.start_path,
         format: manifest.format,
         steps: new_steps,
     };

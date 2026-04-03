@@ -21,6 +21,7 @@ const baseUrl = document.getElementById("base-url")!;
 const stepList = document.getElementById("step-list")!;
 const recordingDot = document.getElementById("recording-dot")!;
 const recordingStatusText = document.getElementById("recording-status-text")!;
+const btnCapture = document.getElementById("btn-capture")!;
 const btnPause = document.getElementById("btn-pause")!;
 const btnStop = document.getElementById("btn-stop")!;
 
@@ -125,7 +126,7 @@ function renderState(state: RecordingState): void {
   if (state.isRecording) {
     showView("recording");
     baseUrl.textContent = state.baseUrl + state.startPath;
-    stepCount.textContent = `${state.steps.length} step${state.steps.length !== 1 ? "s" : ""}`;
+    stepCount.textContent = `${state.steps.length} action${state.steps.length !== 1 ? "s" : ""}`;
 
     // Pause/resume state in panel
     if (state.isPaused) {
@@ -159,7 +160,7 @@ function renderState(state: RecordingState): void {
     exportSummary.innerHTML = `
       <p class="export-title">${escapeHtml(state.tutorialTitle || "Untitled")}</p>
       ${state.tutorialDescription ? `<p class="export-desc">${escapeHtml(state.tutorialDescription)}</p>` : ""}
-      <p class="export-steps-count">${state.steps.length} step${state.steps.length !== 1 ? "s" : ""} recorded</p>
+      <p class="export-steps-count">${state.steps.length} action${state.steps.length !== 1 ? "s" : ""} recorded</p>
     `;
 
     resetUploadFeedback();
@@ -168,7 +169,7 @@ function renderState(state: RecordingState): void {
   }
 }
 
-const ALL_ACTIONS: StepAction[] = ["click", "type", "key", "scroll", "hover", "navigate", "wait", "select"];
+const DEFAULT_ACTIONS: StepAction[] = ["click", "type", "key", "wait", "select"];
 
 function renderSteps(steps: RecordedStep[]): void {
   stepList.innerHTML = "";
@@ -191,7 +192,10 @@ function renderSteps(steps: RecordedStep[]): void {
     const isSensitive = !!step.meta?.sensitive;
 
     // Action dropdown options
-    const actionOptions = ALL_ACTIONS.map(a =>
+    const availableActions = DEFAULT_ACTIONS.includes(step.action)
+      ? DEFAULT_ACTIONS
+      : [...DEFAULT_ACTIONS, step.action];
+    const actionOptions = availableActions.map(a =>
       `<option value="${a}"${a === step.action ? " selected" : ""}>${a}</option>`
     ).join("");
 
@@ -509,6 +513,10 @@ btnPause.addEventListener("click", async () => {
   const msgType = currentState.isPaused ? "RESUME_RECORDING" : "PAUSE_RECORDING";
   const state = await sendMessage({ type: msgType });
   if (state) renderState(state as RecordingState);
+});
+
+btnCapture.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "CAPTURE_SCREEN" });
 });
 
 btnStop.addEventListener("click", async () => {
