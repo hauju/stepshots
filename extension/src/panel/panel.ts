@@ -190,6 +190,9 @@ function renderSteps(steps: RecordedStep[]): void {
     const arrow = highlight?.arrow ?? false;
     const callout = highlight?.callout ?? "";
     const isSensitive = !!step.meta?.sensitive;
+    const captureMeta = step.meta?.captureOnly
+      ? `<div class="step-meta-row"><span class="step-meta-chip">Scene capture</span><span class="step-meta-chip shortcut">Alt+Shift+S</span></div>`
+      : "";
 
     // Action dropdown options
     const availableActions = DEFAULT_ACTIONS.includes(step.action)
@@ -251,6 +254,7 @@ function renderSteps(steps: RecordedStep[]): void {
       </div>
       <div class="step-detail">
         ${stepFields}
+        ${captureMeta}
         <hr class="detail-divider">
         <label>Callout text</label>
         <input type="text" data-field="callout" placeholder="e.g. Click the submit button" value="${escapeHtml(callout)}">

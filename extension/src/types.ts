@@ -9,6 +9,7 @@ export type StepAction =
   | "select";
 
 export interface Highlight {
+  bounds?: ElementBounds;
   showBorder?: boolean;
   callout?: string;
   position?: "top" | "bottom" | "left" | "right";
@@ -26,13 +27,17 @@ export interface ElementBounds {
 
 export interface StepConfig {
   action: StepAction;
+  name?: string;
   selector?: string;
+  selectorQuality?: string;
   text?: string;
   value?: string;
   key?: string;
   url?: string;
   scrollY?: number;
   scrollX?: number;
+  sceneScrollY?: number;
+  sceneScrollX?: number;
   delay?: number;
   highlights: Highlight[];
 }
@@ -40,6 +45,7 @@ export interface StepConfig {
 export interface Viewport {
   width: number;
   height: number;
+  deviceScaleFactor?: number;
 }
 
 export interface TutorialConfig {
@@ -77,6 +83,7 @@ export interface RecordedStep {
   id: string;
   action: StepAction;
   selector?: string;
+  selectorQuality?: string;
   text?: string;
   value?: string;
   key?: string;
@@ -85,6 +92,8 @@ export interface RecordedStep {
   targetUrl?: string;
   scrollX?: number;
   scrollY?: number;
+  sceneScrollX?: number;
+  sceneScrollY?: number;
   highlight?: Highlight;
   targetBounds?: ElementBounds;
   meta?: StepMeta;
@@ -113,7 +122,7 @@ export const DEFAULT_STATE: RecordingState = {
   baseUrl: "",
   startPath: "",
   steps: [],
-  viewport: { width: 1280, height: 800 },
+  viewport: { width: 1280, height: 800, deviceScaleFactor: 1 },
 };
 
 export interface Settings {

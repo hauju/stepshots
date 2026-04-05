@@ -391,9 +391,105 @@ Be explicit about one limitation:
 }
 ```
 
+## AI Agent Integration
+
+### Structured JSON Output
+
+Use `--json` for machine-parseable output from any command:
+
+```bash
+stepshots inspect https://example.com --json    # Discover selectors
+stepshots record --dry-run --json               # Validate config
+stepshots record -t tutorial-key --json         # Record with structured result
+stepshots rerecord bundle.stepshot --json        # Re-record with step-level status
+```
+
+In `--json` mode, the only stdout output is a single JSON object. Human-readable messages are suppressed. Progress bars and warnings go to stderr.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Config error (bad JSON, missing file, validation) |
+| 2 | Browser error (Chrome not found, crash) |
+| 3 | Action error (selector timeout, click failure) |
+| 4 | Bundle error (ZIP/manifest issue) |
+| 5 | Upload / auth error |
+| 10 | Partial success (re-record completed but some steps failed) |
+
+### Recommended AI Agent Workflow
+
+1. `stepshots inspect <url> --json` — discover page selectors
+2. Generate `stepshots.config.json` from natural language + discovered selectors
+3. `stepshots record --dry-run --json` — validate config structure
+4. If validation fails, fix the config based on the error JSON
+5. `stepshots record -t <key> --json` — record the demo
+6. Parse JSON result — if a step failed with a selector error:
+   - Run `stepshots inspect <url> --json` to find the correct selector
+   - Update the config and retry
+7. `stepshots rerecord bundle.stepshot --json` — re-record when UI changes
+   - Check `steps_failed` in output; fix any broken selectors
+
+### JSON Output Shapes
+
+**record** (success):
+```json
+{
+  "success": true,
+  "command": "record",
+  "tutorials": [{
+    "key": "signup-flow",
+    "title": "Sign Up",
+    "output": "output/signup-flow.stepshot",
+    "steps_total": 6,
+    "steps_completed": 6,
+    "steps": [
+      { "index": 0, "name": "View homepage", "action": "wait", "status": "ok" },
+      { "index": 1, "name": "Click Get Started", "action": "click", "selector": "[data-testid='cta']", "status": "ok" }
+    ]
+  }]
+}
+```
+
+**record** (failure):
+```json
+{
+  "success": false,
+  "error": { "category": "action", "message": "Timed out waiting for selector '#btn'" }
+}
+```
+
+**rerecord** (partial success):
+```json
+{
+  "success": false,
+  "command": "rerecord",
+  "source_bundle": "output/demo.stepshot",
+  "output": "output/demo-2026-04-03.stepshot",
+  "steps_total": 5,
+  "steps_completed": 4,
+  "steps_failed": 1,
+  "steps": [
+    { "index": 0, "action": "click", "selector": "#btn", "status": "ok" },
+    { "index": 1, "action": "click", "selector": "#gone", "status": "failed", "error": "Element not found" }
+  ]
+}
+```
+
+**inspect**:
+```json
+{
+  "url": "https://example.com",
+  "elements": [
+    { "index": 1, "tag": "a", "selector": "nav a[href='/pricing']", "text": "Pricing", "href": "/pricing", "bounds": { "x": 800, "y": 12, "width": 60, "height": 20 } }
+  ]
+}
+```
+
 ## Summary
 
-This skill should push Codex toward:
+This skill should push AI agents toward:
 
 - screenshot demos over live replay
 - short clickthroughs over long motion-heavy recordings
@@ -401,3 +497,4 @@ This skill should push Codex toward:
 - clean config generation
 - CLI preview/record/rerecord workflows
 - dashboard export when a saved demo already exists
+- using `--json` for programmatic feedback loops

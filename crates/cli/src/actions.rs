@@ -25,13 +25,23 @@ pub async fn execute_action(
                 .selector
                 .as_deref()
                 .ok_or_else(|| CliError::Action("click action requires a selector".into()))?;
-            let el =
-                browser.page().find_element(selector).await.map_err(|e| {
-                    CliError::Action(format!("Element not found '{selector}': {e}"))
-                })?;
-            el.click()
-                .await
-                .map_err(|e| CliError::Action(format!("Click failed on '{selector}': {e}")))?;
+            if let Ok(el) = browser.page().find_element(selector).await {
+                el.click()
+                    .await
+                    .map_err(|e| CliError::Action(format!("Click failed on '{selector}': {e}")))?;
+            } else if let Some(bounds) = step.highlights.first().and_then(|h| h.bounds.clone()) {
+                eprintln!(
+                    "Warning: selector '{}' did not resolve for click step; using highlight bounds fallback",
+                    selector
+                );
+                let click_x = bounds.x + bounds.width / 2.0;
+                let click_y = bounds.y + bounds.height / 2.0;
+                browser.click_at_point(click_x, click_y).await?;
+            } else {
+                return Err(CliError::Action(format!(
+                    "Element not found '{selector}' and no highlight bounds were available for fallback click"
+                )));
+            }
         }
         "type" => {
             let selector = step

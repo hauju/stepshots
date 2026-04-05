@@ -110,8 +110,9 @@ function onClickCapture(e: MouseEvent): void {
 async function handleClickCapture(e: MouseEvent): Promise<void> {
   if (!active || paused) return;
   if (!e.isTrusted) return;
-  const target = e.target as Element;
-  if (!target) return;
+  const rawTarget = e.target as Element | null;
+  if (!rawTarget) return;
+  const target = resolveActionTarget(rawTarget, "click");
   flushTypeBuffer();
 
   const step = createStep("click", target);
@@ -141,7 +142,10 @@ async function handleClickCapture(e: MouseEvent): Promise<void> {
 // --- Type (input on text fields) ---
 function onInput(e: Event): void {
   if (!active || paused) return;
-  const target = e.target as HTMLInputElement | HTMLTextAreaElement;
+  const target = resolveActionTarget(
+    e.target as Element | null,
+    "type",
+  ) as HTMLInputElement | HTMLTextAreaElement | null;
   if (!target || !isTextInput(target)) return;
 
   // Skip sensitive fields entirely — click already recorded
@@ -178,7 +182,10 @@ function flushTypeBuffer(): void {
 // --- Select (change on <select>) ---
 function onChange(e: Event): void {
   if (!active || paused) return;
-  const target = e.target as HTMLSelectElement;
+  const target = resolveActionTarget(
+    e.target as Element | null,
+    "select",
+  ) as HTMLSelectElement | null;
   if (target.tagName !== "SELECT") return;
   flushTypeBuffer();
 
@@ -238,16 +245,42 @@ function onKeyDown(e: KeyboardEvent): void {
 
 function createStep(action: StepAction, el: Element): RecordedStep {
   const anchor = el.closest("a[href]") as HTMLAnchorElement | null;
+  const generatedSelector = generateSelector(el);
   return {
     id: crypto.randomUUID(),
     action,
-    selector: generateSelector(el),
+    selector: generatedSelector.selector,
+    selectorQuality: generatedSelector.quality,
     currentPath: location.pathname + location.search,
     targetUrl: anchor?.getAttribute("href") ?? undefined,
+    sceneScrollX: Math.round(window.scrollX),
+    sceneScrollY: Math.round(window.scrollY),
     targetBounds: captureTargetBounds(el),
     meta: captureElementMeta(el),
     timestamp: Date.now(),
   };
+}
+
+function resolveActionTarget(target: Element | null, action: StepAction): Element | null {
+  if (!target) return null;
+
+  if (action === "click") {
+    return (
+      target.closest(
+        "a[href], button, [role='button'], input[type='button'], input[type='submit'], summary"
+      ) ?? target
+    );
+  }
+
+  if (action === "type") {
+    return target.closest("input, textarea, [contenteditable='true']") ?? target;
+  }
+
+  if (action === "select") {
+    return target.closest("select") ?? target;
+  }
+
+  return target;
 }
 
 function captureTargetBounds(el: Element): ElementBounds | undefined {

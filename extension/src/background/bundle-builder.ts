@@ -52,10 +52,13 @@ export function buildBundle(
       current_path: step.currentPath,
       target_url: step.targetUrl,
       selector: step.selector,
+      selector_quality: step.selectorQuality,
       text: step.text,
       key: step.key,
-      scrollX: step.scrollX,
-      scrollY: step.scrollY,
+      scroll_x: step.scrollX,
+      scroll_y: step.scrollY,
+      scene_scroll_x: step.sceneScrollX,
+      scene_scroll_y: step.sceneScrollY,
       value: step.value,
     };
 
@@ -68,7 +71,13 @@ export function buildBundle(
 
   const manifest = {
     version: 1,
-    viewport: { width: viewport.width, height: viewport.height },
+    viewport: {
+      width: viewport.width,
+      height: viewport.height,
+      ...(viewport.deviceScaleFactor != null
+        ? { deviceScaleFactor: viewport.deviceScaleFactor }
+        : {}),
+    },
     base_url: state.baseUrl,
     start_path: state.startPath,
     steps: manifestSteps,
@@ -99,10 +108,13 @@ interface ManifestStep {
   current_path?: string;
   target_url?: string;
   selector?: string;
+  selector_quality?: string;
   text?: string;
   key?: string;
-  scrollX?: number;
-  scrollY?: number;
+  scroll_x?: number;
+  scroll_y?: number;
+  scene_scroll_x?: number;
+  scene_scroll_y?: number;
   value?: string;
   highlights?: ManifestHighlight[];
 }

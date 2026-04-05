@@ -14,6 +14,7 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
         viewport: {
           width: window.innerWidth,
           height: window.innerHeight,
+          deviceScaleFactor: window.devicePixelRatio || 1,
         },
       });
       return true;

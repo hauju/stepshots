@@ -1,32 +1,16 @@
 import type { ClickthroughConfig, RecordingState, StepConfig } from "../types";
 
 export function buildConfig(state: RecordingState): ClickthroughConfig {
-  const steps: StepConfig[] = state.steps.map((s) => {
-    const step: StepConfig = { action: s.action };
+  const steps: StepConfig[] = [];
+  let previousPath = state.startPath;
 
-    if (s.selector) step.selector = s.selector;
-    if (s.text) step.text = s.text;
-    if (s.value) step.value = s.value;
-    if (s.key) step.key = s.key;
-    if (s.url) step.url = s.url;
-    if (s.scrollX) step.scrollX = s.scrollX;
-    if (s.scrollY) step.scrollY = s.scrollY;
-
-    if (s.highlight) {
-      const h: Record<string, unknown> = {};
-      if (s.highlight.callout) h.callout = s.highlight.callout;
-      if (s.highlight.showBorder != null) h.showBorder = s.highlight.showBorder;
-      if (s.highlight.position) h.position = s.highlight.position;
-      if (s.highlight.arrow != null) h.arrow = s.highlight.arrow;
-      if (s.highlight.icon) h.icon = s.highlight.icon;
-      if (s.highlight.color) h.color = s.highlight.color;
-      if (Object.keys(h).length > 0) {
-        step.highlights = [h as StepConfig["highlights"][0]];
-      }
+  for (const recordedStep of state.steps) {
+    const pathChanged = !!recordedStep.currentPath && recordedStep.currentPath !== previousPath;
+    steps.push(normalizeRecordedStep(state.baseUrl, recordedStep, pathChanged));
+    if (recordedStep.currentPath) {
+      previousPath = recordedStep.currentPath;
     }
-
-    return step;
-  });
+  }
 
   const config: ClickthroughConfig = {
     baseUrl: state.baseUrl,
@@ -45,4 +29,60 @@ export function buildConfig(state: RecordingState): ClickthroughConfig {
   }
 
   return config;
+}
+
+function normalizeRecordedStep(baseUrl: string, step: RecordingState["steps"][number], pathChanged: boolean): StepConfig {
+  const normalizedAction = step.action === "click"
+    ? normalizeLinkClick(baseUrl, step.targetUrl, step.selector) ?? { action: "click", selector: step.selector, url: step.url }
+    : { action: step.action, selector: step.selector, url: step.url };
+
+  const configStep: StepConfig = { action: normalizedAction.action, highlights: [] };
+
+  if (normalizedAction.selector) configStep.selector = normalizedAction.selector;
+  if (step.selectorQuality) configStep.selectorQuality = step.selectorQuality;
+  if (step.text) configStep.text = step.text;
+  if (step.value) configStep.value = step.value;
+  if (step.key) configStep.key = step.key;
+  if (normalizedAction.url) configStep.url = normalizedAction.url;
+  if (normalizedAction.action === "navigate" && pathChanged) {
+    configStep.delay = 1200;
+  }
+  if (step.scrollX) configStep.scrollX = step.scrollX;
+  if (step.scrollY) configStep.scrollY = step.scrollY;
+  if (step.sceneScrollX != null) configStep.sceneScrollX = step.sceneScrollX;
+  if (step.sceneScrollY != null) configStep.sceneScrollY = step.sceneScrollY;
+
+  if (step.highlight || step.targetBounds) {
+    const highlight = step.highlight;
+    const h: Record<string, unknown> = {};
+    if (step.targetBounds) h.bounds = step.targetBounds;
+    if (highlight?.callout) h.callout = highlight.callout;
+    if (highlight?.showBorder != null) h.showBorder = highlight.showBorder;
+    if (highlight?.position) h.position = highlight.position;
+    if (highlight?.arrow != null) h.arrow = highlight.arrow;
+    if (highlight?.icon) h.icon = highlight.icon;
+    if (highlight?.color) h.color = highlight.color;
+    if (Object.keys(h).length > 0) {
+      configStep.highlights = [h as StepConfig["highlights"][0]];
+    }
+  }
+
+  return configStep;
+}
+
+function normalizeLinkClick(baseUrl: string, targetUrl?: string, selector?: string): { action: "navigate"; url: string; selector?: string } | null {
+  if (!targetUrl || targetUrl.startsWith("#")) {
+    return null;
+  }
+  if (targetUrl.startsWith("/")) {
+    return { action: "navigate", url: targetUrl, selector };
+  }
+
+  const normalizedBase = baseUrl.replace(/\/$/, "");
+  if (targetUrl.startsWith(normalizedBase)) {
+    const path = targetUrl.slice(normalizedBase.length) || "/";
+    return { action: "navigate", url: path.startsWith("/") ? path : `/${path}`, selector };
+  }
+
+  return null;
 }

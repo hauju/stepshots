@@ -11,6 +11,7 @@ use crate::browser::Browser;
 use crate::bundler::create_bundle;
 use crate::config::{StepshotsConfig, TutorialConfig};
 use crate::error::CliError;
+use crate::output::{RecordOutput, StepOutput, TutorialOutput};
 
 /// Record one or more tutorials into `.stepshot` bundles.
 pub async fn run(
@@ -18,6 +19,7 @@ pub async fn run(
     tutorials: &[String],
     output_dir: &Path,
     dry_run: bool,
+    json: bool,
 ) -> Result<(), CliError> {
     let selected: Vec<(&String, &TutorialConfig)> = if tutorials.is_empty() {
         config.tutorials.iter().collect()
@@ -40,27 +42,64 @@ pub async fn run(
         selected
     };
 
+    let mut tutorial_outputs: Vec<TutorialOutput> = Vec::new();
+
     for (key, tutorial) in &selected {
-        println!("Recording: {} ({})", tutorial.title, key);
+        if !json {
+            println!("Recording: {} ({})", tutorial.title, key);
+        }
 
         if dry_run {
-            println!(
-                "  [dry-run] Would record {} steps → {}/{key}.stepshot",
-                tutorial.steps.len(),
-                output_dir.display()
-            );
+            if !json {
+                println!(
+                    "  [dry-run] Would record {} steps → {}/{key}.stepshot",
+                    tutorial.steps.len(),
+                    output_dir.display()
+                );
+            }
+            tutorial_outputs.push(TutorialOutput {
+                key: key.to_string(),
+                title: tutorial.title.clone(),
+                output: Some(format!("{}/{key}.stepshot", output_dir.display())),
+                steps_total: tutorial.steps.len(),
+                steps_completed: None,
+                steps: None,
+            });
             continue;
         }
 
         let output_path = output_dir.join(format!("{key}.stepshot"));
         let effective_viewport = resolve_viewport(config.format.as_ref(), &config.viewport);
-        record_tutorial(config, tutorial, &effective_viewport, &output_path).await?;
+        let step_results =
+            record_tutorial(config, tutorial, &effective_viewport, &output_path, json).await?;
 
-        println!(
-            "  Created: {} ({} steps)",
-            output_path.display(),
-            tutorial.steps.len() + 1
-        );
+        if !json {
+            println!(
+                "  Created: {} ({} steps)",
+                output_path.display(),
+                tutorial.steps.len()
+            );
+        }
+
+        tutorial_outputs.push(TutorialOutput {
+            key: key.to_string(),
+            title: tutorial.title.clone(),
+            output: Some(output_path.display().to_string()),
+            steps_total: tutorial.steps.len(),
+            steps_completed: Some(step_results.len()),
+            steps: Some(step_results),
+        });
+    }
+
+    if json {
+        let out = RecordOutput {
+            success: true,
+            command: "record",
+            dry_run: if dry_run { Some(true) } else { None },
+            tutorials: Some(tutorial_outputs),
+            error: None,
+        };
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
     }
 
     Ok(())
@@ -72,7 +111,8 @@ pub async fn record_tutorial(
     tutorial: &TutorialConfig,
     viewport: &Viewport,
     output_path: &Path,
-) -> Result<(), CliError> {
+    json: bool,
+) -> Result<Vec<StepOutput>, CliError> {
     let browser = Browser::launch(viewport, true).await?;
 
     // Apply color scheme if configured
@@ -86,59 +126,27 @@ pub async fn record_tutorial(
     browser.wait_idle(config.default_delay).await;
 
     let step_count = tutorial.steps.len();
-    let pb = ProgressBar::new((step_count + 1) as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("  [{bar:30}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("=> "),
-    );
+    let pb = if json {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(step_count as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  [{bar:30}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("=> "),
+        );
+        pb
+    };
 
-    let mut screenshots: Vec<Vec<u8>> = Vec::with_capacity(step_count + 1);
-    let mut manifest_steps: Vec<BundleManifestStep> = Vec::with_capacity(step_count + 1);
-    // Transition frames keyed by step index (1-based, matching screenshot index)
+    let mut screenshots: Vec<Vec<u8>> = Vec::with_capacity(step_count);
+    let mut manifest_steps: Vec<BundleManifestStep> = Vec::with_capacity(step_count);
+    let mut step_results: Vec<StepOutput> = Vec::with_capacity(step_count);
+    // Transition frames keyed by step index (0-based, matching screenshot index)
     let mut all_transition_frames: std::collections::HashMap<usize, Vec<Vec<u8>>> =
         std::collections::HashMap::new();
 
-    // Screenshot 0: initial state (no overlays — step overlays are resolved
-    // after each step's action in the loop below)
-    let png = browser.screenshot().await?;
-    screenshots.push(png);
-
-    let current_url = browser
-        .page()
-        .evaluate("window.location.href")
-        .await
-        .ok()
-        .and_then(|v| v.into_value::<String>().ok());
-
-    manifest_steps.push(BundleManifestStep {
-        file: "steps/0.webp".into(),
-        name: None,
-        action: None,
-        url: current_url,
-        selector: None,
-        highlights: None,
-        blur_regions: None,
-        arrows: None,
-        hotspots: None,
-        popups: None,
-        ctas: None,
-        zoom_regions: None,
-        text: None,
-        key: None,
-        scroll_x: None,
-        scroll_y: None,
-        value: None,
-        delay: None,
-        transition_frames: None,
-    });
-    pb.set_message("initial");
-    pb.inc(1);
-
-    // Execute each config step and capture screenshot after.
-    // Each step's overlays are resolved AFTER its action executes, so scrolls
-    // and navigations bring the target element into view before bounds are read.
+    // Execute each config step and capture the screenshot for that step's scene.
     for (i, step) in tutorial.steps.iter().enumerate() {
         pb.set_message(format!(
             "{}: {}",
@@ -147,6 +155,38 @@ pub async fn record_tutorial(
         ));
 
         wait_for_step_target(&browser, step).await?;
+        let capture_before_action = should_capture_before_action(step);
+        restore_scene_scroll(&browser, step).await?;
+
+        let (
+            scene_url,
+            step_highlight,
+            step_blurs,
+            step_arrows,
+            step_hotspots,
+            step_popups,
+            step_ctas,
+            step_zooms,
+        ) = if capture_before_action {
+            let scene_url = get_current_url(&browser).await;
+            (
+                scene_url,
+                resolve_highlight(&browser, step, viewport, i + 1).await?,
+                resolve_blur_regions(&browser, step, viewport, i + 1).await?,
+                resolve_arrows(&browser, step, viewport, i + 1).await?,
+                resolve_hotspots(&browser, step, viewport, i + 1).await?,
+                resolve_popups(&browser, step, viewport, i + 1).await?,
+                resolve_ctas(&browser, step, viewport, i + 1).await?,
+                resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
+            )
+        } else {
+            (None, None, vec![], vec![], vec![], vec![], vec![], vec![])
+        };
+
+        if capture_before_action {
+            let png = browser.screenshot().await?;
+            screenshots.push(png);
+        }
 
         // Execute the action (may capture transition frames for scroll steps)
         let action_result = execute_action(&browser, step, &config.base_url).await?;
@@ -158,8 +198,8 @@ pub async fn record_tutorial(
             browser.wait_idle(delay).await;
         }
 
-        // Resolve THIS step's overlays after its action (element is now in view)
         let (
+            scene_url,
             step_highlight,
             step_blurs,
             step_arrows,
@@ -167,29 +207,44 @@ pub async fn record_tutorial(
             step_popups,
             step_ctas,
             step_zooms,
-        ) = (
-            resolve_highlight(&browser, step, viewport, i + 1).await?,
-            resolve_blur_regions(&browser, step, viewport, i + 1).await?,
-            resolve_arrows(&browser, step, viewport, i + 1).await?,
-            resolve_hotspots(&browser, step, viewport, i + 1).await?,
-            resolve_popups(&browser, step, viewport, i + 1).await?,
-            resolve_ctas(&browser, step, viewport, i + 1).await?,
-            resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
-        );
-
-        // Screenshot after action
-        let png = browser.screenshot().await?;
-        screenshots.push(png);
-
-        let current_url = browser
-            .page()
-            .evaluate("window.location.href")
-            .await
-            .ok()
-            .and_then(|v| v.into_value::<String>().ok());
+        ) = if capture_before_action {
+            (
+                scene_url,
+                step_highlight,
+                step_blurs,
+                step_arrows,
+                step_hotspots,
+                step_popups,
+                step_ctas,
+                step_zooms,
+            )
+        } else {
+            let scene_url = get_current_url(&browser).await;
+            let overlays = (
+                resolve_highlight(&browser, step, viewport, i + 1).await?,
+                resolve_blur_regions(&browser, step, viewport, i + 1).await?,
+                resolve_arrows(&browser, step, viewport, i + 1).await?,
+                resolve_hotspots(&browser, step, viewport, i + 1).await?,
+                resolve_popups(&browser, step, viewport, i + 1).await?,
+                resolve_ctas(&browser, step, viewport, i + 1).await?,
+                resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
+            );
+            let png = browser.screenshot().await?;
+            screenshots.push(png);
+            (
+                scene_url,
+                overlays.0,
+                overlays.1,
+                overlays.2,
+                overlays.3,
+                overlays.4,
+                overlays.5,
+                overlays.6,
+            )
+        };
 
         // Build transition frame paths and store the frame data
-        let step_idx = i + 1;
+        let step_idx = i;
         let transition_frame_paths: Option<Vec<String>> =
             if !action_result.transition_frames.is_empty() {
                 let paths: Vec<String> = (0..action_result.transition_frames.len())
@@ -205,8 +260,14 @@ pub async fn record_tutorial(
             file: format!("steps/{step_idx}.webp"),
             name: step.name.clone(),
             action: Some(step.action.clone()),
-            url: current_url,
+            url: scene_url.clone(),
+            current_path: scene_url
+                .as_deref()
+                .and_then(|url| url.strip_prefix(config.base_url.trim_end_matches('/')))
+                .map(|path| if path.is_empty() { "/".to_string() } else { path.to_string() }),
+            target_url: step.url.clone(),
             selector: step.selector.clone(),
+            selector_quality: step.selector_quality.clone(),
             highlights: step_highlight.map(|a| vec![a]),
             blur_regions: if step_blurs.is_empty() {
                 None
@@ -242,9 +303,20 @@ pub async fn record_tutorial(
             key: step.key.clone(),
             scroll_x: step.scroll_x,
             scroll_y: step.scroll_y,
+            scene_scroll_x: step.scene_scroll_x,
+            scene_scroll_y: step.scene_scroll_y,
             value: step.value.clone(),
             delay: step.delay,
             transition_frames: transition_frame_paths,
+        });
+
+        step_results.push(StepOutput {
+            index: i,
+            name: step.name.clone(),
+            action: step.action.clone(),
+            selector: step.selector.clone(),
+            status: "ok",
+            error: None,
         });
 
         pb.inc(1);
@@ -264,11 +336,12 @@ pub async fn record_tutorial(
 
     create_bundle(&manifest, &screenshots, &all_transition_frames, output_path)?;
 
-    Ok(())
+    Ok(step_results)
 }
 
 async fn wait_for_step_target(browser: &Browser, step: &StepConfig) -> Result<(), CliError> {
     let selector = match step.action.as_str() {
+        "click" if step.highlights.first().and_then(|h| h.bounds.as_ref()).is_some() => None,
         "click" | "type" | "select" | "hover" => step.selector.as_deref(),
         _ => None,
     };
@@ -291,6 +364,27 @@ async fn wait_for_step_target(browser: &Browser, step: &StepConfig) -> Result<()
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
+}
+
+fn should_capture_before_action(step: &StepConfig) -> bool {
+    matches!(step.action.as_str(), "click" | "navigate")
+}
+
+async fn get_current_url(browser: &Browser) -> Option<String> {
+    browser
+        .page()
+        .evaluate("window.location.href")
+        .await
+        .ok()
+        .and_then(|v| v.into_value::<String>().ok())
+}
+
+async fn restore_scene_scroll(browser: &Browser, step: &StepConfig) -> Result<(), CliError> {
+    let x = step.scene_scroll_x.unwrap_or(0.0);
+    let y = step.scene_scroll_y.unwrap_or(0.0);
+    browser.set_scroll_position(x, y).await?;
+    browser.wait_idle(50).await;
+    Ok(())
 }
 
 /// Returns true if bounds are at least partially visible within the viewport.
@@ -319,8 +413,11 @@ async fn resolve_highlight(
         return Ok(None);
     }
     let ann_cfg = &step.highlights[0];
+    let explicit_bounds = ann_cfg.bounds.clone();
     let sel = step.highlight_selector.as_ref().or(step.selector.as_ref());
-    let bounds = if let Some(sel) = sel {
+    let bounds = if explicit_bounds.is_some() {
+        explicit_bounds
+    } else if let Some(sel) = sel {
         browser.get_bounds(sel).await?
     } else {
         None

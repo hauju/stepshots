@@ -18,12 +18,13 @@ pub struct Browser {
 impl Browser {
     /// Launch a Chrome/Chromium instance via CDP.
     pub async fn launch(viewport: &Viewport, headless: bool) -> Result<Self, CliError> {
+        let device_scale_factor = viewport.device_scale_factor.unwrap_or(1.0);
         let mut builder = BrowserConfig::builder()
             .window_size(viewport.width, viewport.height)
             .viewport(chromiumoxide::handler::viewport::Viewport {
                 width: viewport.width,
                 height: viewport.height,
-                device_scale_factor: None,
+                device_scale_factor: Some(device_scale_factor),
                 emulating_mobile: false,
                 is_landscape: false,
                 has_touch: false,
@@ -205,6 +206,48 @@ impl Browser {
             _ => Ok(None),
         }
     }
+
+    pub async fn set_scroll_position(&self, x: f64, y: f64) -> Result<(), CliError> {
+        let js = format!("window.scrollTo({{ left: {x}, top: {y}, behavior: 'instant' }});");
+        self.page
+            .evaluate(js)
+            .await
+            .map_err(|e| CliError::Browser(format!("Failed to set scroll position: {e}")))?;
+        Ok(())
+    }
+
+    pub async fn click_at_point(&self, x: f64, y: f64) -> Result<(), CliError> {
+        let js = format!(
+            r#"
+            (() => {{
+                const x = {x};
+                const y = {y};
+                const el = document.elementFromPoint(x, y);
+                if (!el) return false;
+                const opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y }};
+                el.dispatchEvent(new MouseEvent('mouseover', opts));
+                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                el.dispatchEvent(new MouseEvent('click', opts));
+                return true;
+            }})()
+            "#
+        );
+        let result = self
+            .page
+            .evaluate(js)
+            .await
+            .map_err(|e| CliError::Browser(format!("Point click failed: {e}")))?;
+        let clicked = result.into_value::<bool>().unwrap_or(false);
+        if clicked {
+            Ok(())
+        } else {
+            Err(CliError::Action(format!(
+                "Could not click at viewport point ({x:.1}, {y:.1})"
+            )))
+        }
+    }
+
     /// Get a reference to the underlying CDP page.
     pub fn page(&self) -> &Page {
         &self.page

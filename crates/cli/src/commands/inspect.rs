@@ -1,29 +1,30 @@
 use manifest::Viewport;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::browser::Browser;
 use crate::error::CliError;
+use crate::output;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct InteractiveElement {
     index: usize,
     tag: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     element_type: Option<String>,
     selector: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     text: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     placeholder: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     aria_label: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     href: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     bounds: Option<Bounds>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Bounds {
     x: f64,
     y: f64,
@@ -145,17 +146,53 @@ const SCAN_JS: &str = r#"
 })()
 "#;
 
-pub async fn run(url: &str, width: u32, height: u32) -> Result<(), CliError> {
-    let viewport = Viewport { width, height };
+pub async fn run(url: &str, width: u32, height: u32, json: bool) -> Result<(), CliError> {
+    let viewport = Viewport {
+        width,
+        height,
+        device_scale_factor: None,
+    };
 
-    println!("Launching browser...");
-    let browser = Browser::launch(&viewport, false).await?;
+    if !json {
+        println!("Launching browser...");
+    }
+    let browser = Browser::launch(&viewport, json).await?;
 
-    println!("Navigating to {url}");
+    if !json {
+        println!("Navigating to {url}");
+    }
     browser.navigate(url).await?;
     browser.wait_idle(1500).await;
 
     let mut elements = scan_elements(&browser, false).await?;
+
+    if json {
+        let out = output::InspectOutput {
+            url: url.to_string(),
+            elements: elements
+                .into_iter()
+                .map(|el| output::InspectElement {
+                    index: el.index,
+                    tag: el.tag,
+                    element_type: el.element_type,
+                    selector: el.selector,
+                    text: el.text,
+                    placeholder: el.placeholder,
+                    aria_label: el.aria_label,
+                    href: el.href,
+                    bounds: el.bounds.map(|b| output::InspectBounds {
+                        x: b.x,
+                        y: b.y,
+                        width: b.width,
+                        height: b.height,
+                    }),
+                })
+                .collect(),
+        };
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return Ok(());
+    }
+
     print_table(url, &elements);
 
     // Interactive REPL

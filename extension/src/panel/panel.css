@@ -259,6 +259,16 @@ input:focus {
   word-break: break-all;
 }
 
+.recording-hint {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .recording-controls {
   display: flex;
   gap: 8px;
@@ -340,6 +350,29 @@ input:focus {
   font-size: 12px;
 }
 
+.step-meta-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.step-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.step-meta-chip.shortcut {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .step-highlight-icon {
   font-size: 12px;
   flex-shrink: 0;
@@ -408,6 +441,7 @@ input:focus {
 .step-detail label:first-child {
   margin-top: 0;
 }
+
 
 .step-detail input[type="text"] {
   margin-top: 2px;

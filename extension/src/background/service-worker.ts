@@ -329,14 +329,20 @@ async function handleMessage(
     }
 
     case "EXPORT_CONFIG": {
-      state.viewport = message.viewport;
+      state.viewport = {
+        ...message.viewport,
+        deviceScaleFactor: state.viewport.deviceScaleFactor,
+      };
       const config = buildConfig(state);
       const json = JSON.stringify(config, null, 2);
       return { json };
     }
 
     case "UPLOAD_TO_STEPSHOTS": {
-      state.viewport = message.viewport;
+      state.viewport = {
+        ...message.viewport,
+        deviceScaleFactor: state.viewport.deviceScaleFactor,
+      };
       const stepshotsUrl = settings.stepshotsUrl.replace(/\/$/, "");
 
       if (!settings.apiKey) {

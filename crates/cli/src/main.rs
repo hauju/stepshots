@@ -5,6 +5,7 @@ mod bundler;
 mod commands;
 mod config;
 mod error;
+pub mod output;
 
 use std::path::PathBuf;
 
@@ -26,6 +27,10 @@ struct Cli {
     /// Enable verbose logging
     #[arg(long, short, global = true)]
     verbose: bool,
+
+    /// Output results as JSON to stdout (for AI agents and automation)
+    #[arg(long, global = true)]
+    json: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -152,13 +157,26 @@ async fn main() {
             .init();
     }
 
+    let json = cli.json;
     if let Err(e) = run(cli).await {
-        eprintln!("Error: {e}");
-        std::process::exit(1);
+        if json {
+            let output = serde_json::json!({
+                "success": false,
+                "error": {
+                    "category": e.error_category(),
+                    "message": e.to_string()
+                }
+            });
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        } else {
+            eprintln!("Error: {e}");
+        }
+        std::process::exit(e.exit_code());
     }
 }
 
 async fn run(cli: Cli) -> Result<(), CliError> {
+    let json = cli.json;
     match cli.command {
         Commands::Init { force } => {
             commands::init::run(force)?;
@@ -170,13 +188,17 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         } => {
             let config_path = config::find_config(cli.config.as_deref())?;
             let config = config::load_config(&config_path)?;
-            println!("Using config: {}", config_path.display());
-            commands::record::run(&config, &tutorial, &output, dry_run).await?;
+            if !json {
+                println!("Using config: {}", config_path.display());
+            }
+            commands::record::run(&config, &tutorial, &output, dry_run, json).await?;
         }
         Commands::Preview { tutorial } => {
             let config_path = config::find_config(cli.config.as_deref())?;
             let config = config::load_config(&config_path)?;
-            println!("Using config: {}", config_path.display());
+            if !json {
+                println!("Using config: {}", config_path.display());
+            }
             let effective_viewport =
                 manifest::resolve_viewport(config.format.as_ref(), &config.viewport);
             commands::preview::run(&config, &tutorial, &effective_viewport).await?;
@@ -188,7 +210,8 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             headed,
             delay,
         } => {
-            commands::rerecord::run(&bundle, base_url.as_deref(), &output, headed, delay).await?;
+            commands::rerecord::run(&bundle, base_url.as_deref(), &output, headed, delay, json)
+                .await?;
         }
         Commands::Upload {
             files,
@@ -215,11 +238,13 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 None => {
                     let config_path = config::find_config(cli.config.as_deref())?;
                     let config = config::load_config(&config_path)?;
-                    println!("Using config: {}", config_path.display());
+                    if !json {
+                        println!("Using config: {}", config_path.display());
+                    }
                     config.base_url.clone()
                 }
             };
-            commands::inspect::run(&url, width, height).await?;
+            commands::inspect::run(&url, width, height, json).await?;
         }
         Commands::Upgrade { force, check } => {
             commands::upgrade::run(force, check).await?;

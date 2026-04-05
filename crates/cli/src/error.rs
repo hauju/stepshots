@@ -28,6 +28,10 @@ pub enum CliError {
 
     #[error("{0}")]
     Other(String),
+
+    /// Re-record completed but some steps failed.
+    #[error("{0}")]
+    PartialSuccess(String),
 }
 
 impl From<chromiumoxide::error::CdpError> for CliError {
@@ -51,5 +55,33 @@ impl From<zip::result::ZipError> for CliError {
 impl From<reqwest::Error> for CliError {
     fn from(e: reqwest::Error) -> Self {
         CliError::Upload(e.to_string())
+    }
+}
+
+impl CliError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            CliError::Config(_) | CliError::Io(_) | CliError::Upgrade(_) | CliError::Other(_) => 1,
+            CliError::PartialSuccess(_) => 10,
+            CliError::Browser(_) => 2,
+            CliError::Action(_) => 3,
+            CliError::Bundle(_) => 4,
+            CliError::Upload(_) | CliError::Auth(_) => 5,
+        }
+    }
+
+    pub fn error_category(&self) -> &'static str {
+        match self {
+            CliError::Config(_) => "config",
+            CliError::Browser(_) => "browser",
+            CliError::Action(_) => "action",
+            CliError::Bundle(_) => "bundle",
+            CliError::Upload(_) => "upload",
+            CliError::Auth(_) => "auth",
+            CliError::Io(_) => "io",
+            CliError::Upgrade(_) => "upgrade",
+            CliError::Other(_) => "other",
+            CliError::PartialSuccess(_) => "partial_success",
+        }
     }
 }

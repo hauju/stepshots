@@ -44,6 +44,8 @@ pub struct StepConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector_quality: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -57,6 +59,10 @@ pub struct StepConfig {
     pub scroll_x: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_y: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_scroll_x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_scroll_y: Option<f64>,
     /// Optional CSS selector used only for resolving highlight bounds.
     /// When set, overrides `selector` for highlight resolution so that
     /// action steps (scroll, navigate) can target one element while
@@ -84,6 +90,8 @@ pub struct StepConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HighlightConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<ElementBounds>,
     #[serde(alias = "highlight")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_border: Option<bool>,
@@ -277,6 +285,7 @@ pub fn resolve_viewport(format: Option<&DemoFormat>, viewport: &Viewport) -> Vie
         Some((w, h)) => Viewport {
             width: w,
             height: h,
+            device_scale_factor: viewport.device_scale_factor,
         },
         None => viewport.clone(),
     }
@@ -286,6 +295,7 @@ pub fn default_viewport() -> Viewport {
     Viewport {
         width: 1280,
         height: 800,
+        device_scale_factor: None,
     }
 }
 
@@ -477,9 +487,12 @@ pub struct ZoomRegion {
 
 /// Viewport dimensions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Viewport {
     pub width: u32,
     pub height: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_scale_factor: Option<f64>,
 }
 
 /// Manifest format inside a `.stepshot` bundle zip.
@@ -508,12 +521,17 @@ pub struct BundleManifestStep {
     pub action: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(alias = "currentPath")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_path: Option<String>,
+    #[serde(alias = "targetUrl")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_url: Option<String>,
     #[serde(default)]
     pub selector: Option<String>,
+    #[serde(alias = "selectorQuality")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector_quality: Option<String>,
     #[serde(alias = "annotations")]
     #[serde(default)]
     pub highlights: Option<Vec<HighlightEntry>>,
@@ -535,10 +553,18 @@ pub struct BundleManifestStep {
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    #[serde(alias = "scrollX")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_x: Option<f64>,
+    #[serde(alias = "scrollY")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_y: Option<f64>,
+    #[serde(alias = "sceneScrollX")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_scroll_x: Option<f64>,
+    #[serde(alias = "sceneScrollY")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_scroll_y: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -554,6 +580,7 @@ impl From<&BundleManifestStep> for StepConfig {
             action: step.action.clone().unwrap_or_default(),
             name: step.name.clone(),
             selector: step.selector.clone(),
+            selector_quality: step.selector_quality.clone(),
             text: step.text.clone(),
             url: step.url.clone(),
             key: step.key.clone(),
@@ -561,6 +588,8 @@ impl From<&BundleManifestStep> for StepConfig {
             delay: step.delay,
             scroll_x: step.scroll_x,
             scroll_y: step.scroll_y,
+            scene_scroll_x: step.scene_scroll_x,
+            scene_scroll_y: step.scene_scroll_y,
             highlight_selector: None,
             highlights: vec![],
             blur_regions: vec![],

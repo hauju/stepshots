@@ -10,7 +10,7 @@
   <!-- Setup view (not recording) -->
   <div id="view-setup">
     <h1>Stepshots Recorder</h1>
-    <p class="panel-intro">Record a repeatable flow here, then upload it to polish and share in the app.</p>
+    <p class="panel-intro">Record a flow here, then upload it to polish and share in the app.</p>
     <div id="tab-info" class="tab-info"></div>
     <label for="tutorial-title">Title</label>
     <input type="text" id="tutorial-title" placeholder="e.g. Sign Up Flow">
@@ -34,6 +34,7 @@
         <ul>
           <li>Navigate to the starting page before recording</li>
           <li>Each interaction becomes a step you can annotate</li>
+          <li>Use <strong>Capture Screen</strong> or <strong>Alt+Shift+S</strong> for scene-only steps</li>
           <li>Use the in-page HUD to pause or stop recording</li>
         </ul>
       </div>
@@ -51,6 +52,7 @@
       <span id="step-count" class="badge">0 actions</span>
     </div>
     <p id="base-url" class="meta"></p>
+    <p id="recording-hint" class="recording-hint">Capture a scene without clicking: <strong>Alt+Shift+S</strong></p>
     <div id="step-list" class="step-list"></div>
     <div class="recording-controls">
       <button id="btn-capture" class="btn" title="Capture screen without an action (Alt+Shift+S)">Capture Screen</button>

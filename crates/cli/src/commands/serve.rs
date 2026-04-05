@@ -128,9 +128,10 @@ async fn handle_record(
     std::fs::create_dir_all(&output_dir).ok();
     let output_path = output_dir.join(format!("{}.stepshot", req.tutorial_name));
 
-    match record::record_tutorial(&req.config, &tutorial, &req.config.viewport, &output_path).await
+    match record::record_tutorial(&req.config, &tutorial, &req.config.viewport, &output_path, false)
+        .await
     {
-        Ok(()) => {
+        Ok(_) => {
             let dir = output_dir
                 .canonicalize()
                 .unwrap_or(output_dir.clone())

@@ -9,6 +9,7 @@ use crate::browser::Browser;
 use crate::bundle_reader::read_bundle_manifest;
 use crate::bundler::create_bundle;
 use crate::error::CliError;
+use crate::output::{RerecordOutput, StepOutput};
 
 /// Re-record a `.stepshot` bundle with fresh screenshots and updated bounds.
 pub async fn run(
@@ -17,6 +18,7 @@ pub async fn run(
     output_dir: &Path,
     headed: bool,
     default_delay: u64,
+    json: bool,
 ) -> Result<(), CliError> {
     let manifest = read_bundle_manifest(bundle_path)?;
 
@@ -30,115 +32,137 @@ pub async fn run(
         extract_base_url(&manifest)?
     };
 
-    println!("Re-recording from: {}", style(bundle_path.display()).cyan());
-    println!("  Base URL: {base_url}");
-    println!("  Steps: {}", manifest.steps.len());
+    if !json {
+        println!("Re-recording from: {}", style(bundle_path.display()).cyan());
+        println!("  Base URL: {base_url}");
+        println!("  Steps: {}", manifest.steps.len());
+    }
 
     let browser = Browser::launch(&manifest.viewport, !headed).await?;
 
     let step_count = manifest.steps.len();
-    let pb = ProgressBar::new(step_count as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("  [{bar:30}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("=> "),
-    );
+    let pb = if json {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(step_count as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  [{bar:30}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("=> "),
+        );
+        pb
+    };
 
     let mut screenshots: Vec<Vec<u8>> = Vec::with_capacity(step_count);
     let mut new_steps: Vec<BundleManifestStep> = Vec::with_capacity(step_count);
+    let mut step_results: Vec<StepOutput> = Vec::with_capacity(step_count);
     let mut failed_count: usize = 0;
 
-    // Step 0: navigate to start URL and capture initial screenshot
-    let step0 = &manifest.steps[0];
-    let start_url = step0
-        .url
+    let start_path = manifest
+        .start_path
         .as_deref()
-        .ok_or_else(|| CliError::Bundle("Step 0 has no URL".into()))?;
+        .or_else(|| manifest.steps.first().and_then(|s| s.current_path.as_deref()))
+        .or_else(|| manifest.steps.first().and_then(|s| s.url.as_deref()))
+        .ok_or_else(|| CliError::Bundle("Could not determine start URL".into()))?;
 
-    let start_url = resolve_url(&base_url, start_url);
+    let start_url = resolve_url(&base_url, start_path);
     browser.navigate(&start_url).await?;
     browser.wait_idle(default_delay).await;
 
-    let png = browser.screenshot().await?;
-    screenshots.push(png);
-
-    let current_url = get_current_url(&browser).await;
-    new_steps.push(BundleManifestStep {
-        file: "steps/0.webp".into(),
-        name: step0.name.clone(),
-        action: None,
-        url: current_url,
-        selector: step0.selector.clone(),
-        highlights: step0.highlights.clone(),
-        blur_regions: step0.blur_regions.clone(),
-        arrows: step0.arrows.clone(),
-        hotspots: step0.hotspots.clone(),
-        popups: step0.popups.clone(),
-        ctas: step0.ctas.clone(),
-        zoom_regions: step0.zoom_regions.clone(),
-        text: None,
-        key: None,
-        scroll_x: None,
-        scroll_y: None,
-        value: None,
-        delay: None,
-        transition_frames: None,
-    });
-    pb.set_message("initial");
-    pb.inc(1);
-
-    // Steps 1..N: replay actions
-    for (i, old_step) in manifest.steps.iter().enumerate().skip(1) {
+    for (i, old_step) in manifest.steps.iter().enumerate() {
         let action_name = old_step.action.as_deref().unwrap_or("unknown");
         let selector_display = old_step.selector.as_deref().unwrap_or("");
         pb.set_message(format!("{action_name}: {selector_display}"));
 
-        // Capture new bounds BEFORE executing the action
-        let new_bounds = if let Some(ref sel) = old_step.selector {
-            browser.get_bounds(sel).await.unwrap_or(None)
+        wait_for_replay_target(&browser, old_step).await?;
+        let capture_before_action = should_capture_before_replay(old_step);
+        restore_replay_scene_scroll(&browser, old_step).await?;
+        let new_bounds = if capture_before_action {
+            if let Some(ref sel) = old_step.selector {
+                browser.get_bounds(sel).await.unwrap_or(None)
+            } else {
+                None
+            }
         } else {
             None
         };
+        let scene_url = if capture_before_action {
+            get_current_url(&browser).await
+        } else {
+            None
+        };
+        let scene_highlights = if capture_before_action {
+            old_step.highlights.as_ref().map(|anns| {
+                anns.iter()
+                    .filter_map(|a| carry_highlight(a, new_bounds.clone(), &manifest.viewport, i))
+                    .collect()
+            })
+        } else {
+            None
+        };
+        if capture_before_action {
+            let png = browser.screenshot().await?;
+            screenshots.push(png);
+        }
 
         // Convert manifest step to StepConfig and execute
         let step_config = StepConfig::from(old_step);
-        let step_failed = match execute_action(&browser, &step_config, &base_url).await {
-            Ok(_) => false,
-            Err(e) => {
-                failed_count += 1;
-                pb.suspend(|| {
-                    eprintln!(
-                        "  {} Step {}/{} FAILED: {} on {:?} — {}",
-                        style("⚠").yellow().bold(),
-                        i,
-                        step_count - 1,
-                        action_name,
-                        selector_display,
-                        e
-                    );
-                    eprintln!("    Capturing current page state...");
-                });
-                true
-            }
-        };
+        let (step_failed, step_error) =
+            match execute_action(&browser, &step_config, &base_url).await {
+                Ok(_) => (false, None),
+                Err(e) => {
+                    failed_count += 1;
+                    let error_msg = e.to_string();
+                    if !json {
+                        pb.suspend(|| {
+                            eprintln!(
+                                "  {} Step {}/{} FAILED: {} on {:?} — {}",
+                                style("⚠").yellow().bold(),
+                                i,
+                                step_count - 1,
+                                action_name,
+                                selector_display,
+                                error_msg
+                            );
+                            eprintln!("    Capturing current page state...");
+                        });
+                    }
+                    (true, Some(error_msg))
+                }
+            };
+
+        step_results.push(StepOutput {
+            index: i,
+            name: old_step.name.clone(),
+            action: action_name.to_string(),
+            selector: old_step.selector.clone(),
+            status: if step_failed { "failed" } else { "ok" },
+            error: step_error,
+        });
 
         // Wait for things to settle
         let delay = old_step.delay.unwrap_or(default_delay);
         browser.wait_idle(delay).await;
 
-        // Capture screenshot (even on failure)
-        let png = browser.screenshot().await?;
-        screenshots.push(png);
-
-        let current_url = get_current_url(&browser).await;
-
-        // Carry highlights with updated bounds (skip off-screen)
-        let highlights = old_step.highlights.as_ref().map(|anns| {
-            anns.iter()
-                .filter_map(|a| carry_highlight(a, new_bounds.clone(), &manifest.viewport, i))
-                .collect()
-        });
+        let (scene_url, highlights) = if capture_before_action {
+            (scene_url, scene_highlights)
+        } else {
+            let png = browser.screenshot().await?;
+            screenshots.push(png);
+            let current_url = get_current_url(&browser).await;
+            let new_bounds = if let Some(ref sel) = old_step.selector {
+                browser.get_bounds(sel).await.unwrap_or(None)
+            } else {
+                None
+            };
+            let highlights = old_step.highlights.as_ref().map(|anns| {
+                anns.iter()
+                    .filter_map(|a| carry_highlight(a, new_bounds.clone(), &manifest.viewport, i))
+                    .collect()
+            });
+            (current_url, highlights)
+        };
 
         new_steps.push(BundleManifestStep {
             file: format!("steps/{i}.webp"),
@@ -147,9 +171,12 @@ pub async fn run(
             url: if step_failed {
                 old_step.url.clone()
             } else {
-                current_url
+                scene_url
             },
+            current_path: old_step.current_path.clone(),
+            target_url: old_step.target_url.clone(),
             selector: old_step.selector.clone(),
+            selector_quality: old_step.selector_quality.clone(),
             highlights,
             blur_regions: old_step.blur_regions.clone(),
             arrows: old_step.arrows.clone(),
@@ -161,6 +188,8 @@ pub async fn run(
             key: old_step.key.clone(),
             scroll_x: old_step.scroll_x,
             scroll_y: old_step.scroll_y,
+            scene_scroll_x: old_step.scene_scroll_x,
+            scene_scroll_y: old_step.scene_scroll_y,
             value: old_step.value.clone(),
             delay: old_step.delay,
             transition_frames: None,
@@ -195,36 +224,57 @@ pub async fn run(
         &output_path,
     )?;
 
-    // Print summary
-    let file_size = std::fs::metadata(&output_path)
-        .map(|m| format_size(m.len()))
-        .unwrap_or_else(|_| "?".into());
+    // Output results
+    let ok_count = step_count.saturating_sub(failed_count);
 
-    let ok_count = step_count - 1 - failed_count; // -1 for step 0 which has no action
-    println!();
-    if failed_count == 0 {
-        println!(
-            "  {} {} → {}",
-            style("✓").green().bold(),
-            bundle_name,
-            style(output_path.display()).cyan(),
-        );
-        println!("    {} steps · {}", step_count, file_size,);
+    if json {
+        let out = RerecordOutput {
+            success: failed_count == 0,
+            command: "rerecord",
+            source_bundle: bundle_path.display().to_string(),
+            output: output_path.display().to_string(),
+            steps_total: step_count,
+            steps_completed: ok_count,
+            steps_failed: failed_count,
+            steps: step_results,
+        };
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
     } else {
-        println!(
-            "  {} {} → {}",
-            style("⚠").yellow().bold(),
-            bundle_name,
-            style(output_path.display()).cyan(),
-        );
-        println!(
-            "    {} steps ({} ok, {} {}) · {}",
-            step_count,
-            ok_count,
-            failed_count,
-            style("failed").red(),
-            file_size,
-        );
+        let file_size = std::fs::metadata(&output_path)
+            .map(|m| format_size(m.len()))
+            .unwrap_or_else(|_| "?".into());
+
+        println!();
+        if failed_count == 0 {
+            println!(
+                "  {} {} → {}",
+                style("✓").green().bold(),
+                bundle_name,
+                style(output_path.display()).cyan(),
+            );
+            println!("    {} steps · {}", step_count, file_size,);
+        } else {
+            println!(
+                "  {} {} → {}",
+                style("⚠").yellow().bold(),
+                bundle_name,
+                style(output_path.display()).cyan(),
+            );
+            println!(
+                "    {} steps ({} ok, {} {}) · {}",
+                step_count,
+                ok_count,
+                failed_count,
+                style("failed").red(),
+                file_size,
+            );
+        }
+    }
+
+    if failed_count > 0 {
+        return Err(CliError::PartialSuccess(format!(
+            "{failed_count} step(s) failed during re-recording"
+        )));
     }
 
     Ok(())
@@ -276,7 +326,12 @@ fn carry_highlight(
 
 /// Validate that manifest steps have enough data for replay.
 fn validate_replayability(manifest: &BundleManifest) -> Result<(), CliError> {
-    for (i, step) in manifest.steps.iter().enumerate().skip(1) {
+    for (i, step) in manifest.steps.iter().enumerate() {
+        if step.action.is_none() {
+            return Err(CliError::Bundle(format!(
+                "Step {i} has no action. This rerecord flow expects explicit action-owned steps."
+            )));
+        }
         let action = step.action.as_deref().unwrap_or("");
         match action {
             "type" if step.text.is_none() => {
@@ -308,24 +363,61 @@ fn validate_replayability(manifest: &BundleManifest) -> Result<(), CliError> {
 
 /// Extract the base URL (scheme + host) from the first step's URL.
 fn extract_base_url(manifest: &BundleManifest) -> Result<String, CliError> {
-    let url = manifest
-        .steps
-        .first()
-        .and_then(|s| s.url.as_deref())
-        .ok_or_else(|| CliError::Bundle("No URL in step 0 to derive base URL".into()))?;
-
-    // Parse scheme + host from the URL
-    if let Some(idx) = url.find("://") {
-        let rest = &url[idx + 3..];
-        if let Some(path_start) = rest.find('/') {
-            return Ok(url[..idx + 3 + path_start].to_string());
-        }
-        return Ok(url.to_string());
+    if let Some(base_url) = manifest.base_url.as_ref() {
+        return Ok(base_url.clone());
     }
+    Err(CliError::Bundle(
+        "Bundle is missing base_url. Re-export or provide --base-url.".into(),
+    ))
+}
 
-    Err(CliError::Bundle(format!(
-        "Cannot extract base URL from step 0 URL: {url}. Use --base-url to specify."
-    )))
+async fn wait_for_replay_target(
+    browser: &Browser,
+    step: &BundleManifestStep,
+) -> Result<(), CliError> {
+    let selector = match step.action.as_deref().unwrap_or("") {
+        "click" if step
+            .highlights
+            .as_ref()
+            .and_then(|highlights| highlights.first())
+            .is_some() => None,
+        "click" | "type" | "select" | "hover" => step.selector.as_deref(),
+        _ => None,
+    };
+
+    let Some(selector) = selector else {
+        return Ok(());
+    };
+
+    let timeout = std::time::Duration::from_secs(10);
+    let start = std::time::Instant::now();
+    loop {
+        if browser.page().find_element(selector).await.is_ok() {
+            return Ok(());
+        }
+        if start.elapsed() > timeout {
+            return Err(CliError::Action(format!(
+                "Timed out waiting for selector '{selector}' before replaying '{}'",
+                step.action.as_deref().unwrap_or("unknown")
+            )));
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+}
+
+fn should_capture_before_replay(step: &BundleManifestStep) -> bool {
+    matches!(step.action.as_deref(), Some("click" | "navigate"))
+}
+
+async fn restore_replay_scene_scroll(
+    browser: &Browser,
+    step: &BundleManifestStep,
+) -> Result<(), CliError> {
+    let x = step.scene_scroll_x.unwrap_or(0.0);
+    let y = step.scene_scroll_y.unwrap_or(0.0);
+    browser.set_scroll_position(x, y).await?;
+    browser.wait_idle(50).await;
+    Ok(())
 }
 
 fn resolve_url(base: &str, url: &str) -> String {
