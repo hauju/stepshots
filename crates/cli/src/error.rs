@@ -28,10 +28,6 @@ pub enum CliError {
 
     #[error("{0}")]
     Other(String),
-
-    /// Re-record completed but some steps failed.
-    #[error("{0}")]
-    PartialSuccess(String),
 }
 
 impl From<chromiumoxide::error::CdpError> for CliError {
@@ -62,7 +58,6 @@ impl CliError {
     pub fn exit_code(&self) -> i32 {
         match self {
             CliError::Config(_) | CliError::Io(_) | CliError::Upgrade(_) | CliError::Other(_) => 1,
-            CliError::PartialSuccess(_) => 10,
             CliError::Browser(_) => 2,
             CliError::Action(_) => 3,
             CliError::Bundle(_) => 4,
@@ -81,7 +76,6 @@ impl CliError {
             CliError::Io(_) => "io",
             CliError::Upgrade(_) => "upgrade",
             CliError::Other(_) => "other",
-            CliError::PartialSuccess(_) => "partial_success",
         }
     }
 }

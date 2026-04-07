@@ -26,7 +26,7 @@ pub struct TutorialOutput {
     pub steps: Option<Vec<StepOutput>>,
 }
 
-/// Per-step result (shared between record and rerecord).
+/// Per-step result.
 #[derive(Serialize)]
 pub struct StepOutput {
     pub index: usize,
@@ -38,19 +38,6 @@ pub struct StepOutput {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-}
-
-/// JSON output for `rerecord`.
-#[derive(Serialize)]
-pub struct RerecordOutput {
-    pub success: bool,
-    pub command: &'static str,
-    pub source_bundle: String,
-    pub output: String,
-    pub steps_total: usize,
-    pub steps_completed: usize,
-    pub steps_failed: usize,
-    pub steps: Vec<StepOutput>,
 }
 
 /// JSON output for `inspect --json`.

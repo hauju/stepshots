@@ -535,7 +535,7 @@ pub struct BundleManifestStep {
     #[serde(alias = "annotations")]
     #[serde(default)]
     pub highlights: Option<Vec<HighlightEntry>>,
-    // Editor overlay types (carried through re-record)
+    // Editor overlay types
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur_regions: Option<Vec<ElementBounds>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -548,7 +548,7 @@ pub struct BundleManifestStep {
     pub ctas: Option<Vec<CtaButton>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom_regions: Option<Vec<ZoomRegion>>,
-    // Action parameters for re-recording (makes bundles self-contained)
+    // Action parameters (makes bundles self-contained for replay)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

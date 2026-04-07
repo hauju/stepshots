@@ -41,11 +41,10 @@ All serde uses `camelCase` for JSON interop.
 
 ### `crates/cli/` — `stepshots-cli` (binary: `stepshots`)
 CLI that records browser interactions into `.stepshot` bundles. Key modules:
-- `commands/` — one file per subcommand: `init`, `record`, `preview`, `rerecord`, `upload`, `inspect`, `serve`
+- `commands/` — one file per subcommand: `init`, `record`, `preview`, `upload`, `inspect`, `serve`
 - `browser.rs` — Chrome/Chromium automation via `chromiumoxide`
 - `actions.rs` — step action execution (click, type, scroll, etc.)
 - `bundler.rs` — creates `.stepshot` ZIP bundles (PNG screenshots + JSON manifest)
-- `bundle_reader.rs` — reads existing `.stepshot` bundles (for re-record)
 - `config.rs` — config file discovery and loading
 
 The CLI requires Chrome/Chromium installed. Set `CHROME_PATH` if not in the default location.

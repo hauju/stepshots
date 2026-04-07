@@ -50,12 +50,6 @@ stepshots upload output/my-tutorial.stepshot --server https://your-instance.com
 
 Set `STEPSHOTS_TOKEN` for authentication and `STEPSHOTS_SERVER` to override the default server URL.
 
-### Re-record an existing bundle
-
-```sh
-stepshots rerecord my-tutorial.stepshot
-```
-
 ## Configuration
 
 Tutorials are defined in `stepshots.config.json`. See `stepshots init` for an example.

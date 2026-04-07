@@ -1,6 +1,5 @@
 mod actions;
 mod browser;
-mod bundle_reader;
 mod bundler;
 mod commands;
 mod config;
@@ -62,27 +61,6 @@ enum Commands {
     Preview {
         /// Tutorial key to preview
         tutorial: String,
-    },
-    /// Re-record a .stepshot bundle with fresh screenshots
-    ReRecord {
-        /// Path to existing .stepshot bundle
-        bundle: PathBuf,
-
-        /// Override base URL (e.g. for staging/CI environments)
-        #[arg(long)]
-        base_url: Option<String>,
-
-        /// Output directory for the new bundle
-        #[arg(long, short, default_value = "output")]
-        output: PathBuf,
-
-        /// Show browser window (non-headless)
-        #[arg(long)]
-        headed: bool,
-
-        /// Default delay between steps in ms
-        #[arg(long, default_value = "500")]
-        delay: u64,
     },
     /// Upload .stepshot bundles to the Stepshots API
     Upload {
@@ -202,16 +180,6 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             let effective_viewport =
                 manifest::resolve_viewport(config.format.as_ref(), &config.viewport);
             commands::preview::run(&config, &tutorial, &effective_viewport).await?;
-        }
-        Commands::ReRecord {
-            bundle,
-            base_url,
-            output,
-            headed,
-            delay,
-        } => {
-            commands::rerecord::run(&bundle, base_url.as_deref(), &output, headed, delay, json)
-                .await?;
         }
         Commands::Upload {
             files,

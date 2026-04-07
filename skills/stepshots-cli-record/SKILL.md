@@ -2,9 +2,9 @@
 name: stepshots-cli-record
 description: |
   Create screenshot-based product demos using Stepshots from natural-language flow descriptions.
-  Use when a user wants to record or rerecord a clickthrough demo, generate or edit
+  Use when a user wants to record a clickthrough demo, generate or edit
   stepshots.config.json, or turn an existing saved Stepshots demo into a CLI recording config.
-  Works for both CLI-first and Codex-assisted workflows.
+  Works for both CLI-first and AI-assisted workflows.
 author: Hauke Jung
 version: 2.0.0
 ---
@@ -28,7 +28,7 @@ When using this skill, Codex should:
 2. Prefer a clean clickthrough sequence over trying to show every intermediate UI motion.
 3. Generate or update `stepshots.config.json`.
 4. Prefer `click`, `type`, `select`, `key`, `wait`, and explicit scene captures.
-5. Use the CLI to preview, validate, record, or rerecord when needed.
+5. Use the CLI to preview, validate, and record.
 6. If the user already has a saved demo, export or reconstruct a CLI config from that demo when possible.
 
 ## Product Model
@@ -281,28 +281,13 @@ Use:
 - `record --dry-run` to validate config structure
 - `record` for final capture
 
-## Rerecord Workflow
-
-If the UI changed but the flow is conceptually the same:
-
-```bash
-stepshots rerecord output/tutorial-key.stepshot
-```
-
-This preserves annotations while refreshing screenshots.
-
-If the user already has a saved demo in the dashboard:
-- prefer exporting `stepshots.config.json` from the demo first
-- then use that config with the CLI for deterministic rerecording
-
 ## Dashboard Export Guidance
 
-The dashboard can now export a saved screenshot demo as `stepshots.config.json` for CLI rerecording.
+The dashboard can export a saved screenshot demo as `stepshots.config.json` for CLI recording.
 
 Use this when:
 - the user already created the flow in the extension
 - they want a repo-friendly config
-- they want to automate rerecording in CI or locally
 
 Be explicit about one limitation:
 - older demos may not export fully if they were created before recording origin metadata was stored
@@ -401,7 +386,6 @@ Use `--json` for machine-parseable output from any command:
 stepshots inspect https://example.com --json    # Discover selectors
 stepshots record --dry-run --json               # Validate config
 stepshots record -t tutorial-key --json         # Record with structured result
-stepshots rerecord bundle.stepshot --json        # Re-record with step-level status
 ```
 
 In `--json` mode, the only stdout output is a single JSON object. Human-readable messages are suppressed. Progress bars and warnings go to stderr.
@@ -416,7 +400,6 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 | 3 | Action error (selector timeout, click failure) |
 | 4 | Bundle error (ZIP/manifest issue) |
 | 5 | Upload / auth error |
-| 10 | Partial success (re-record completed but some steps failed) |
 
 ### Recommended AI Agent Workflow
 
@@ -428,9 +411,6 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 6. Parse JSON result — if a step failed with a selector error:
    - Run `stepshots inspect <url> --json` to find the correct selector
    - Update the config and retry
-7. `stepshots rerecord bundle.stepshot --json` — re-record when UI changes
-   - Check `steps_failed` in output; fix any broken selectors
-
 ### JSON Output Shapes
 
 **record** (success):
@@ -460,23 +440,6 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 }
 ```
 
-**rerecord** (partial success):
-```json
-{
-  "success": false,
-  "command": "rerecord",
-  "source_bundle": "output/demo.stepshot",
-  "output": "output/demo-2026-04-03.stepshot",
-  "steps_total": 5,
-  "steps_completed": 4,
-  "steps_failed": 1,
-  "steps": [
-    { "index": 0, "action": "click", "selector": "#btn", "status": "ok" },
-    { "index": 1, "action": "click", "selector": "#gone", "status": "failed", "error": "Element not found" }
-  ]
-}
-```
-
 **inspect**:
 ```json
 {
@@ -495,6 +458,6 @@ This skill should push AI agents toward:
 - short clickthroughs over long motion-heavy recordings
 - explicit scenes over inferred navigation
 - clean config generation
-- CLI preview/record/rerecord workflows
+- CLI preview/record workflows
 - dashboard export when a saved demo already exists
 - using `--json` for programmatic feedback loops
