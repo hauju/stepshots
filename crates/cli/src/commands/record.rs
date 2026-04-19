@@ -2,7 +2,7 @@ use std::path::Path;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use manifest::{
-    ArrowPointer, BundleManifest, BundleManifestStep, CtaButton, ElementBounds, HighlightEntry,
+    ArrowPointer, BundleManifest, BundleManifestStep, ElementBounds, HighlightEntry,
     HotspotIndicator, PopupIndicator, StepConfig, Viewport, ZoomRegion, resolve_viewport,
 };
 
@@ -99,7 +99,10 @@ pub async fn run(
             tutorials: Some(tutorial_outputs),
             error: None,
         };
-        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).expect("serializing RecordOutput")
+        );
     }
 
     Ok(())
@@ -165,7 +168,6 @@ pub async fn record_tutorial(
             step_arrows,
             step_hotspots,
             step_popups,
-            step_ctas,
             step_zooms,
         ) = if capture_before_action {
             let scene_url = get_current_url(&browser).await;
@@ -176,11 +178,10 @@ pub async fn record_tutorial(
                 resolve_arrows(&browser, step, viewport, i + 1).await?,
                 resolve_hotspots(&browser, step, viewport, i + 1).await?,
                 resolve_popups(&browser, step, viewport, i + 1).await?,
-                resolve_ctas(&browser, step, viewport, i + 1).await?,
                 resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
             )
         } else {
-            (None, None, vec![], vec![], vec![], vec![], vec![], vec![])
+            (None, None, vec![], vec![], vec![], vec![], vec![])
         };
 
         if capture_before_action {
@@ -205,7 +206,6 @@ pub async fn record_tutorial(
             step_arrows,
             step_hotspots,
             step_popups,
-            step_ctas,
             step_zooms,
         ) = if capture_before_action {
             (
@@ -215,7 +215,6 @@ pub async fn record_tutorial(
                 step_arrows,
                 step_hotspots,
                 step_popups,
-                step_ctas,
                 step_zooms,
             )
         } else {
@@ -226,20 +225,12 @@ pub async fn record_tutorial(
                 resolve_arrows(&browser, step, viewport, i + 1).await?,
                 resolve_hotspots(&browser, step, viewport, i + 1).await?,
                 resolve_popups(&browser, step, viewport, i + 1).await?,
-                resolve_ctas(&browser, step, viewport, i + 1).await?,
                 resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
             );
             let png = browser.screenshot().await?;
             screenshots.push(png);
             (
-                scene_url,
-                overlays.0,
-                overlays.1,
-                overlays.2,
-                overlays.3,
-                overlays.4,
-                overlays.5,
-                overlays.6,
+                scene_url, overlays.0, overlays.1, overlays.2, overlays.3, overlays.4, overlays.5,
             )
         };
 
@@ -264,7 +255,13 @@ pub async fn record_tutorial(
             current_path: scene_url
                 .as_deref()
                 .and_then(|url| url.strip_prefix(config.base_url.trim_end_matches('/')))
-                .map(|path| if path.is_empty() { "/".to_string() } else { path.to_string() }),
+                .map(|path| {
+                    if path.is_empty() {
+                        "/".to_string()
+                    } else {
+                        path.to_string()
+                    }
+                }),
             target_url: step.url.clone(),
             selector: step.selector.clone(),
             selector_quality: step.selector_quality.clone(),
@@ -289,11 +286,7 @@ pub async fn record_tutorial(
             } else {
                 Some(step_popups)
             },
-            ctas: if step_ctas.is_empty() {
-                None
-            } else {
-                Some(step_ctas)
-            },
+            ctas: None,
             zoom_regions: if step_zooms.is_empty() {
                 None
             } else {
@@ -341,7 +334,15 @@ pub async fn record_tutorial(
 
 async fn wait_for_step_target(browser: &Browser, step: &StepConfig) -> Result<(), CliError> {
     let selector = match step.action.as_str() {
-        "click" if step.highlights.first().and_then(|h| h.bounds.as_ref()).is_some() => None,
+        "click"
+            if step
+                .highlights
+                .first()
+                .and_then(|h| h.bounds.as_ref())
+                .is_some() =>
+        {
+            None
+        }
         "click" | "type" | "select" | "hover" => step.selector.as_deref(),
         _ => None,
     };
@@ -569,62 +570,20 @@ async fn resolve_popups(
                 width: cfg.width,
                 color: cfg.color.clone(),
                 text_color: cfg.text_color.clone(),
+                style: cfg.style.clone(),
+                variant: cfg.variant.clone(),
+                size: cfg.size.clone(),
                 border_radius: None,
                 animation: Some("fade-up".to_string()),
                 delay: Some(150),
                 duration: Some(450),
                 dismissible: None,
                 is_click_target: None,
-                button_text: None,
-                button_url: None,
+                button_text: cfg.button_text.clone(),
+                button_url: cfg.button_url.clone(),
+                open_in_new_tab: cfg.open_in_new_tab,
             });
         }
-    }
-    Ok(results)
-}
-
-async fn resolve_ctas(
-    browser: &Browser,
-    step: &StepConfig,
-    viewport: &Viewport,
-    step_num: usize,
-) -> Result<Vec<CtaButton>, CliError> {
-    let mut results = Vec::new();
-    for cfg in &step.ctas {
-        let (x, y) = if let Some(ref sel) = cfg.selector {
-            if let Some(center) = browser.get_element_center(sel).await? {
-                (center.x, center.y)
-            } else {
-                continue;
-            }
-        } else if let (Some(x), Some(y)) = (cfg.x, cfg.y) {
-            (x, y)
-        } else {
-            continue;
-        };
-        if !is_point_visible(x, y, viewport) {
-            eprintln!(
-                "  \u{26a0} Step {step_num} \"{}\": CTA resolved off-screen, skipping",
-                step.name.as_deref().unwrap_or("")
-            );
-            continue;
-        }
-        results.push(CtaButton {
-            x,
-            y,
-            label: cfg.label.clone(),
-            url: cfg.url.clone(),
-            open_in_new_tab: cfg.open_in_new_tab,
-            variant: cfg.variant.clone(),
-            size: cfg.size.clone(),
-            color: cfg.color.clone(),
-            text_color: cfg.text_color.clone(),
-            border_radius: None,
-            animation: Some("fade-up".to_string()),
-            delay: Some(150),
-            duration: Some(450),
-            is_click_target: None,
-        });
     }
     Ok(results)
 }

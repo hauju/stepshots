@@ -491,6 +491,17 @@ btnStart.addEventListener("click", async () => {
   inputTitle.style.borderColor = "";
   hideSetupStatus();
 
+  // Request host permission for the active tab's origin (must happen in UI gesture context)
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.url && !tab.url.startsWith("chrome://") && !tab.url.startsWith("chrome-extension://")) {
+    const origin = new URL(tab.url).origin + "/*";
+    const granted = await chrome.permissions.request({ origins: [origin] });
+    if (!granted) {
+      showSetupStatus("Permission denied. The extension needs access to this site to record.");
+      return;
+    }
+  }
+
   previousStepCount = 0;
   expandedStepId = null;
   hideUndoBar();
@@ -645,12 +656,13 @@ btnSettingsToggle.addEventListener("click", () => {
 });
 
 btnSettingsSave.addEventListener("click", async () => {
+  const current = await sendMessage({ type: "GET_SETTINGS" }) as Settings | null;
   await sendMessage({
     type: "SAVE_SETTINGS",
     settings: {
       stepshotsUrl: settingStepshotsUrl.value.trim() || "https://stepshots.com",
       apiKey: settingApiKey.value.trim() || undefined,
-      cliServerUrl: "http://localhost:8124",
+      cliServerUrl: current?.cliServerUrl || "http://localhost:8124",
     },
   });
   btnSettingsSave.textContent = "Saved!";

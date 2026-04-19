@@ -125,7 +125,7 @@ pub async fn run(
                 let demo_id = body
                     .get("id")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
+                    .ok_or_else(|| CliError::Upload("API response missing 'id' field".into()))?
                     .to_string();
                 let view_url = format!("{}/demos/{demo_id}", server_url.trim_end_matches('/'));
                 println!("  Uploaded! Demo ID: {demo_id}");

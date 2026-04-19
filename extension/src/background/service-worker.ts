@@ -24,14 +24,23 @@ async function loadState(): Promise<void> {
 }
 
 async function loadSettings(): Promise<void> {
-  const result = await chrome.storage.sync.get("settings");
+  // One-time migration from sync to local storage
+  const syncResult = await chrome.storage.sync.get("settings");
+  if (syncResult.settings) {
+    settings = syncResult.settings as Settings;
+    await chrome.storage.local.set({ settings });
+    await chrome.storage.sync.remove("settings");
+    return;
+  }
+
+  const result = await chrome.storage.local.get("settings");
   if (result.settings) {
     settings = result.settings as Settings;
   }
 }
 
 async function saveSettings(): Promise<void> {
-  await chrome.storage.sync.set({ settings });
+  await chrome.storage.local.set({ settings });
 }
 
 // Broadcast state to popup
@@ -405,6 +414,17 @@ async function directUpload(
     return { error: `Upload failed: ${err}` };
   }
 }
+
+// Re-inject content script when the recording tab navigates to a new page
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (
+    state.isRecording &&
+    tabId === state.recordingTabId &&
+    changeInfo.status === "complete"
+  ) {
+    await ensureContentScript(tabId);
+  }
+});
 
 // Open side panel when extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });

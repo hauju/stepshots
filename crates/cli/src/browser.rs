@@ -152,7 +152,7 @@ impl Browser {
                 return {{ x: r.x, y: r.y, width: r.width, height: r.height }};
             }})()
             "#,
-            selector = serde_json::to_string(selector).unwrap()
+            selector = serde_json::to_string(selector)?
         );
         let result = self
             .page
@@ -186,7 +186,7 @@ impl Browser {
                 return {{ x: r.x + r.width / 2, y: r.y + r.height / 2 }};
             }})()
             "#,
-            selector = serde_json::to_string(selector).unwrap()
+            selector = serde_json::to_string(selector)?
         );
         let result = self
             .page

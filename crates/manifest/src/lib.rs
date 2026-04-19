@@ -159,6 +159,24 @@ pub struct PopupConfig {
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_color: Option<String>,
+    /// Rendering style: "card" (default) or "button".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    /// Visual variant: "primary", "secondary", "ghost", etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    /// Size token: "xs", "sm", "md", "lg".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+    /// Optional button label displayed at the bottom of the popup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub button_text: Option<String>,
+    /// Optional URL the button links to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub button_url: Option<String>,
+    /// Whether the button opens in a new tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_in_new_tab: Option<bool>,
 }
 
 /// CTA button config — resolved from CSS selector or explicit coordinates.
@@ -441,6 +459,18 @@ pub struct PopupIndicator {
     /// Optional URL the button links to (opens in new tab).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub button_url: Option<String>,
+    /// Rendering style: "card" (default, tooltip card) or "button" (inline button).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    /// Visual variant: "primary", "secondary", "ghost", etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    /// Size token: "xs", "sm", "md", "lg".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+    /// Whether clicking the popup's button opens in a new tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_in_new_tab: Option<bool>,
 }
 
 /// A call-to-action button overlay at a specific point.

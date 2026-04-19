@@ -30,8 +30,8 @@ pub async fn execute_action(
                     .await
                     .map_err(|e| CliError::Action(format!("Click failed on '{selector}': {e}")))?;
             } else if let Some(bounds) = step.highlights.first().and_then(|h| h.bounds.clone()) {
-                eprintln!(
-                    "Warning: selector '{}' did not resolve for click step; using highlight bounds fallback",
+                tracing::warn!(
+                    "selector '{}' did not resolve for click step; using highlight bounds fallback",
                     selector
                 );
                 let click_x = bounds.x + bounds.width / 2.0;
@@ -70,7 +70,7 @@ pub async fn execute_action(
                         .key("a")
                         .modifiers(if cfg!(target_os = "macos") { 4 } else { 2 })
                         .build()
-                        .unwrap(),
+                        .map_err(|e| CliError::Action(format!("Failed to build DispatchKeyEventParams: {e}")))?,
                 )
                 .await
                 .ok();
@@ -100,7 +100,7 @@ pub async fn execute_action(
             let js = if let Some(ref sel) = step.selector {
                 format!(
                     "document.querySelector({}).scrollBy({{left:{x},top:{y},behavior:'smooth'}})",
-                    serde_json::to_string(sel).unwrap()
+                    serde_json::to_string(sel)?
                 )
             } else {
                 format!("window.scrollBy({{left:{x},top:{y},behavior:'smooth'}})")
@@ -141,7 +141,7 @@ pub async fn execute_action(
                 })?;
             let js = format!(
                 "(() => {{ const el = document.querySelector({sel}); if(el) el.scrollIntoView({{behavior:'smooth',block:'center'}}); }})()",
-                sel = serde_json::to_string(selector).unwrap()
+                sel = serde_json::to_string(selector)?
             );
             browser
                 .page()
@@ -218,8 +218,8 @@ pub async fn execute_action(
                 .ok_or_else(|| CliError::Action("select action requires a value".into()))?;
             let js = format!(
                 "(() => {{ const el = document.querySelector({sel}); if(el) {{ el.value = {val}; el.dispatchEvent(new Event('change', {{bubbles:true}})); }} }})()",
-                sel = serde_json::to_string(selector).unwrap(),
-                val = serde_json::to_string(value).unwrap(),
+                sel = serde_json::to_string(selector)?,
+                val = serde_json::to_string(value)?,
             );
             browser
                 .page()

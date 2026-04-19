@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::http::{HeaderValue, Method};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::commands::record;
 use crate::config::StepshotsConfig;
@@ -67,7 +68,17 @@ pub async fn run(port: u16, output: PathBuf) -> Result<(), CliError> {
         .route("/api/health", get(health))
         .route("/api/record", post(handle_record))
         .route("/api/upload", post(handle_upload))
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+                    let s = origin.to_str().unwrap_or("");
+                    s.starts_with("chrome-extension://")
+                        || s.starts_with("http://localhost")
+                        || s.starts_with("http://127.0.0.1")
+                }))
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers(tower_http::cors::Any),
+        )
         .with_state(state);
 
     let addr = format!("127.0.0.1:{port}");
@@ -128,8 +139,14 @@ async fn handle_record(
     std::fs::create_dir_all(&output_dir).ok();
     let output_path = output_dir.join(format!("{}.stepshot", req.tutorial_name));
 
-    match record::record_tutorial(&req.config, &tutorial, &req.config.viewport, &output_path, false)
-        .await
+    match record::record_tutorial(
+        &req.config,
+        &tutorial,
+        &req.config.viewport,
+        &output_path,
+        false,
+    )
+    .await
     {
         Ok(_) => {
             let dir = output_dir

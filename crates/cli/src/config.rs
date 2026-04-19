@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 // Re-export config types from the shared manifest crate.
 #[allow(unused_imports)]
 pub use manifest::{
-    ArrowConfig, BlurConfig, CtaConfig, DemoFormat, HighlightConfig, HotspotConfig, PopupConfig,
-    StepConfig, StepshotsConfig, TutorialConfig, ZoomConfig, default_delay, default_viewport,
+    ArrowConfig, BlurConfig, DemoFormat, HighlightConfig, HotspotConfig, PopupConfig, StepConfig,
+    StepshotsConfig, TutorialConfig, ZoomConfig, default_delay, default_viewport,
 };
 
 use crate::error::CliError;
@@ -330,21 +330,6 @@ fn validate_step(path: &str, step: &StepConfig) -> Vec<ConfigError> {
         }
     }
 
-    for (i, c) in step.ctas.iter().enumerate() {
-        if c.selector.is_none() && (c.x.is_none() || c.y.is_none()) {
-            errors.push(ConfigError {
-                path: format!("{path}.ctas[{i}]"),
-                message: "CTA requires \"selector\" or both \"x\" and \"y\"".into(),
-            });
-        }
-        if c.label.is_empty() {
-            errors.push(ConfigError {
-                path: format!("{path}.ctas[{i}]"),
-                message: "\"label\" must not be empty".into(),
-            });
-        }
-    }
-
     for (i, z) in step.zoom_regions.iter().enumerate() {
         if z.selector.is_empty() {
             errors.push(ConfigError {
@@ -430,7 +415,7 @@ pub fn sample_config() -> String {
             },
         )]),
     })
-    .unwrap()
+    .expect("sample config is a known-good struct")
 }
 
 #[cfg(test)]
