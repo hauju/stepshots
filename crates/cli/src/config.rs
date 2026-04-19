@@ -199,13 +199,11 @@ fn validate_step(path: &str, step: &StepConfig) -> Vec<ConfigError> {
 
     // Action-specific required fields
     match step.action.as_str() {
-        "click" | "hover" => {
-            if step.selector.is_none() {
-                errors.push(ConfigError {
-                    path: path.into(),
-                    message: format!("\"{}\" action requires \"selector\"", step.action),
-                });
-            }
+        "click" | "hover" if step.selector.is_none() => {
+            errors.push(ConfigError {
+                path: path.into(),
+                message: format!("\"{}\" action requires \"selector\"", step.action),
+            });
         }
         "type" => {
             if step.selector.is_none() {
@@ -221,37 +219,29 @@ fn validate_step(path: &str, step: &StepConfig) -> Vec<ConfigError> {
                 });
             }
         }
-        "key" => {
-            if step.key.is_none() {
-                errors.push(ConfigError {
-                    path: path.into(),
-                    message: "\"key\" action requires \"key\"".into(),
-                });
-            }
+        "key" if step.key.is_none() => {
+            errors.push(ConfigError {
+                path: path.into(),
+                message: "\"key\" action requires \"key\"".into(),
+            });
         }
-        "scroll-to" => {
-            if step.selector.is_none() && step.highlight_selector.is_none() {
-                errors.push(ConfigError {
-                    path: path.into(),
-                    message: "\"scroll-to\" requires \"selector\" or \"highlightSelector\"".into(),
-                });
-            }
+        "scroll-to" if step.selector.is_none() && step.highlight_selector.is_none() => {
+            errors.push(ConfigError {
+                path: path.into(),
+                message: "\"scroll-to\" requires \"selector\" or \"highlightSelector\"".into(),
+            });
         }
-        "navigate" => {
-            if step.url.is_none() {
-                errors.push(ConfigError {
-                    path: path.into(),
-                    message: "\"navigate\" action requires \"url\"".into(),
-                });
-            }
+        "navigate" if step.url.is_none() => {
+            errors.push(ConfigError {
+                path: path.into(),
+                message: "\"navigate\" action requires \"url\"".into(),
+            });
         }
-        "select" => {
-            if step.selector.is_none() {
-                errors.push(ConfigError {
-                    path: path.into(),
-                    message: "\"select\" action requires \"selector\"".into(),
-                });
-            }
+        "select" if step.selector.is_none() => {
+            errors.push(ConfigError {
+                path: path.into(),
+                message: "\"select\" action requires \"selector\"".into(),
+            });
         }
         _ => {} // scroll, wait — no strict requirements
     }
