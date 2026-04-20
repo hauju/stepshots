@@ -60,7 +60,6 @@ function normalizeRecordedStep(baseUrl: string, step: RecordingState["steps"][nu
     if (highlight?.showBorder != null) h.showBorder = highlight.showBorder;
     if (highlight?.position) h.position = highlight.position;
     if (highlight?.arrow != null) h.arrow = highlight.arrow;
-    if (highlight?.icon) h.icon = highlight.icon;
     if (highlight?.color) h.color = highlight.color;
     if (Object.keys(h).length > 0) {
       configStep.highlights = [h as StepConfig["highlights"][0]];

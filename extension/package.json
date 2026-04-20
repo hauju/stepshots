@@ -10,6 +10,8 @@
     "@types/chrome": "^0.1.37"
   },
   "dependencies": {
-    "fflate": "^0.8.2"
+    "@preact/signals": "^2.9.0",
+    "fflate": "^0.8.2",
+    "preact": "^10.29.1"
   }
 }

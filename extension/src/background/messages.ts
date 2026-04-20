@@ -57,6 +57,12 @@ export interface ReorderStepsMessage {
   toIndex: number;
 }
 
+export interface UpdateTutorialMetaMessage {
+  type: "UPDATE_TUTORIAL_META";
+  tutorialTitle?: string;
+  tutorialDescription?: string;
+}
+
 export interface ExportConfigMessage {
   type: "EXPORT_CONFIG";
   viewport: Viewport;
@@ -147,6 +153,7 @@ export type Message =
   | DeleteStepMessage
   | InsertStepMessage
   | ReorderStepsMessage
+  | UpdateTutorialMetaMessage
   | ExportConfigMessage
   | GetSettingsMessage
   | SaveSettingsMessage

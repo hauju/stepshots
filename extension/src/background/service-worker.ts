@@ -337,6 +337,19 @@ async function handleMessage(
       return state;
     }
 
+    case "UPDATE_TUTORIAL_META": {
+      if (message.tutorialTitle !== undefined) {
+        state.tutorialTitle = message.tutorialTitle;
+        state.tutorialName = slugify(message.tutorialTitle) || state.tutorialName;
+      }
+      if (message.tutorialDescription !== undefined) {
+        state.tutorialDescription = message.tutorialDescription;
+      }
+      await saveState();
+      broadcastState();
+      return state;
+    }
+
     case "EXPORT_CONFIG": {
       state.viewport = {
         ...message.viewport,
@@ -413,6 +426,13 @@ async function directUpload(
   } catch (err) {
     return { error: `Upload failed: ${err}` };
   }
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 // Re-inject content script when the recording tab navigates to a new page

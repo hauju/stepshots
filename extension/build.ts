@@ -36,7 +36,7 @@ async function build() {
       format: "esm",
     }),
     Bun.build({
-      entrypoints: [join(import.meta.dir, "src/panel/panel.ts")],
+      entrypoints: [join(import.meta.dir, "src/panel/panel.tsx")],
       outdir: join(import.meta.dir, "dist"),
       naming: "panel.js",
       target: "browser",

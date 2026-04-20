@@ -444,7 +444,6 @@ async fn resolve_highlight(
         arrow: ann_cfg.arrow,
         color: ann_cfg.color.clone(),
         border_width: None,
-        icon: ann_cfg.icon.clone(),
         shape: None,
         is_click_target: None,
         callout_offset: None,
@@ -452,6 +451,7 @@ async fn resolve_highlight(
         callout_style: None,
         button_text: None,
         spotlight: None,
+        spotlight_opacity: None,
         animation: Some("zoom-in".to_string()),
         delay: Some(150),
         duration: Some(450),
@@ -508,6 +508,10 @@ async fn resolve_arrows(
                 stroke_width: cfg.stroke_width,
                 curvature: cfg.curvature,
                 text: None,
+                font_size: None,
+                animation: None,
+                delay: None,
+                duration: None,
             });
         }
     }

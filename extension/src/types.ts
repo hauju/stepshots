@@ -14,7 +14,6 @@ export interface Highlight {
   callout?: string;
   position?: "top" | "bottom" | "left" | "right";
   arrow?: boolean;
-  icon?: string;
   color?: string;
 }
 

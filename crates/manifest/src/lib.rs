@@ -98,8 +98,6 @@ pub struct HighlightConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callout: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -340,8 +338,6 @@ pub struct HighlightEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_click_target: Option<bool>,
@@ -360,6 +356,9 @@ pub struct HighlightEntry {
     /// Dim the rest of the screenshot to spotlight this highlight (defaults to true).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spotlight: Option<bool>,
+    /// Opacity of the spotlight darkening overlay (0.0–1.0, defaults to 0.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spotlight_opacity: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -408,6 +407,18 @@ pub struct ArrowPointer {
     /// Optional text label displayed near the arrow's start (from) point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Font size in viewport pixels for the text label (defaults to 14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f64>,
+    /// Animation preset: "fade", "fade-up", "zoom-in", "pulse", or "none".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animation: Option<String>,
+    /// Animation start delay in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay: Option<u32>,
+    /// Animation duration in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
 }
 
 /// A hotspot indicator at a specific point.

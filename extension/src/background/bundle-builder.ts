@@ -96,7 +96,6 @@ interface ManifestHighlight {
   arrow?: boolean;
   color?: string;
   borderWidth?: number;
-  icon?: string;
   isClickTarget?: boolean;
 }
 
@@ -134,7 +133,6 @@ function buildManifestHighlight(
     arrow: highlight?.arrow ?? false,
     color: highlight?.color ?? "#3b82f6",
     borderWidth: highlight?.showBorder === false ? 0 : 2,
-    ...(highlight?.icon ? { icon: highlight.icon } : {}),
     isClickTarget: true,
   };
 }
