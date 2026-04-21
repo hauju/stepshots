@@ -5,3 +5,4 @@ bun.lock
 .DS_Store
 /output
 .env
+/dist-release

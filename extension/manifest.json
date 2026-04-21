@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stepshots Recorder",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Record website interactions as interactive product demos",
   "author": "Stepshots",
   "homepage_url": "https://stepshots.com",
