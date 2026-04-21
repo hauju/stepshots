@@ -21,7 +21,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -44,7 +44,7 @@ jobs:
           tar -czf "${STAGE}.tar.gz" "$STAGE"
           shasum -a 256 "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.target }}
           path: |
@@ -55,7 +55,7 @@ jobs:
     name: Build Chrome extension
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: oven-sh/setup-bun@v2
 
@@ -70,10 +70,14 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ZIP="../stepshots-extension-v${VERSION}.zip"
-          zip -r "$ZIP" manifest.json icons dist src/panel/panel.html src/panel/panel.css -x "*.DS_Store"
+          zip -D "$ZIP" \
+            manifest.json \
+            icons/icon-16.png icons/icon-48.png icons/icon-128.png \
+            dist/content.js dist/service-worker.js dist/panel.js \
+            src/panel/panel.html src/panel/panel.css
           shasum -a 256 "$ZIP" > "${ZIP}.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: extension
           path: |
@@ -85,7 +89,7 @@ jobs:
     needs: [build-cli, build-extension]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -93,7 +97,7 @@ jobs:
       - name: List artifacts
         run: ls -la artifacts
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: artifacts/*
           generate_release_notes: true
