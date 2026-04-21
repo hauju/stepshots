@@ -286,7 +286,6 @@ pub async fn record_tutorial(
             } else {
                 Some(step_popups)
             },
-            ctas: None,
             zoom_regions: if step_zooms.is_empty() {
                 None
             } else {

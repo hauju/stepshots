@@ -81,8 +81,6 @@ pub struct StepConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub popups: Vec<PopupConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ctas: Vec<CtaConfig>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_regions: Vec<ZoomConfig>,
 }
 
@@ -175,31 +173,6 @@ pub struct PopupConfig {
     /// Whether the button opens in a new tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_in_new_tab: Option<bool>,
-}
-
-/// CTA button config — resolved from CSS selector or explicit coordinates.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CtaConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selector: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub x: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub y: Option<f64>,
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub open_in_new_tab: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text_color: Option<String>,
 }
 
 /// Zoom region config — resolved from CSS selector to element bounds.
@@ -484,36 +457,6 @@ pub struct PopupIndicator {
     pub open_in_new_tab: Option<bool>,
 }
 
-/// A call-to-action button overlay at a specific point.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CtaButton {
-    pub x: f64,
-    pub y: f64,
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub open_in_new_tab: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub border_radius: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub animation: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delay: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub is_click_target: Option<bool>,
-}
-
 /// A zoom region that triggers an animated zoom-into-area effect on the screenshot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ZoomRegion {
@@ -586,8 +529,6 @@ pub struct BundleManifestStep {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub popups: Option<Vec<PopupIndicator>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ctas: Option<Vec<CtaButton>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom_regions: Option<Vec<ZoomRegion>>,
     // Action parameters (makes bundles self-contained for replay)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -637,7 +578,6 @@ impl From<&BundleManifestStep> for StepConfig {
             arrows: vec![],
             hotspots: vec![],
             popups: vec![],
-            ctas: vec![],
             zoom_regions: vec![],
         }
     }

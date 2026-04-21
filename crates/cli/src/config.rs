@@ -374,7 +374,6 @@ pub fn sample_config() -> String {
                         arrows: vec![],
                         hotspots: vec![],
                         popups: vec![],
-                        ctas: vec![],
                         zoom_regions: vec![],
                     },
                     StepConfig {
@@ -397,7 +396,6 @@ pub fn sample_config() -> String {
                         arrows: vec![],
                         hotspots: vec![],
                         popups: vec![],
-                        ctas: vec![],
                         zoom_regions: vec![],
                     },
                 ],
@@ -495,7 +493,6 @@ mod tests {
             arrows: vec![],
             hotspots: vec![],
             popups: vec![],
-            ctas: vec![],
             zoom_regions: vec![],
         }
     }
