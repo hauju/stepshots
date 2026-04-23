@@ -427,6 +427,7 @@ async fn resolve_highlight(
         y: 0.0,
         width: 0.0,
         height: 0.0,
+        z_index: None,
     });
     if !is_bounds_visible(&bounds, viewport) {
         let sel_str = sel.map(|s| s.as_str()).unwrap_or("(none)");
@@ -454,6 +455,7 @@ async fn resolve_highlight(
         animation: Some("zoom-in".to_string()),
         delay: Some(150),
         duration: Some(450),
+        z_index: None,
     }))
 }
 
@@ -511,6 +513,7 @@ async fn resolve_arrows(
                 animation: None,
                 delay: None,
                 duration: None,
+                z_index: None,
             });
         }
     }
@@ -542,6 +545,7 @@ async fn resolve_hotspots(
                 callout: cfg.callout.clone(),
                 position: cfg.position.clone(),
                 is_click_target: cfg.is_click_target,
+                z_index: None,
             });
         }
     }
@@ -585,6 +589,7 @@ async fn resolve_popups(
                 button_text: cfg.button_text.clone(),
                 button_url: cfg.button_url.clone(),
                 open_in_new_tab: cfg.open_in_new_tab,
+                z_index: None,
             });
         }
     }
@@ -606,6 +611,7 @@ async fn resolve_zoom_regions(
                     magnification: cfg.magnification,
                     delay: cfg.delay,
                     duration: cfg.duration,
+                    z_index: None,
                 });
             } else {
                 eprintln!(

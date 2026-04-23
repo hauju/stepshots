@@ -338,6 +338,10 @@ pub struct HighlightEntry {
     pub delay: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<u32>,
+    /// Paint-order index within the step. Higher values render on top.
+    /// Dashboard editor assigns this on first load for bundles that predate the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<u32>,
 }
 
 /// Callout position offset relative to the element bounds.
@@ -351,12 +355,19 @@ pub struct CalloutOffset {
 }
 
 /// Pixel coordinates for a highlight region.
+///
+/// The optional `z_index` is only meaningful when `ElementBounds` is used directly
+/// as an overlay (e.g. `BundleManifestStep.blur_regions`). When nested as a sub-`bounds`
+/// field on another overlay (e.g. `HighlightEntry.bounds`, `ZoomRegion.bounds`), the
+/// overlay's own `z_index` governs paint order and this field stays `None`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ElementBounds {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<u32>,
 }
 
 /// A 2D point in viewport coordinates.
@@ -392,6 +403,9 @@ pub struct ArrowPointer {
     /// Animation duration in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<u32>,
+    /// Paint-order index within the step. Higher values render on top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<u32>,
 }
 
 /// A hotspot indicator at a specific point.
@@ -409,6 +423,9 @@ pub struct HotspotIndicator {
     pub position: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_click_target: Option<bool>,
+    /// Paint-order index within the step. Higher values render on top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<u32>,
 }
 
 /// A popup card indicator at a specific point.
@@ -455,6 +472,9 @@ pub struct PopupIndicator {
     /// Whether clicking the popup's button opens in a new tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_in_new_tab: Option<bool>,
+    /// Paint-order index within the step. Higher values render on top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<u32>,
 }
 
 /// A zoom region that triggers an animated zoom-into-area effect on the screenshot.
@@ -467,6 +487,9 @@ pub struct ZoomRegion {
     pub delay: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<u32>,
+    /// Paint-order index within the step. Higher values render on top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<u32>,
 }
 
 /// Viewport dimensions.

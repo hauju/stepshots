@@ -168,6 +168,7 @@ impl Browser {
                     y: obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0),
                     width: obj.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0),
                     height: obj.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    z_index: None,
                 };
                 Ok(Some(bounds))
             }
