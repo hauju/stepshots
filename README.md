@@ -6,6 +6,16 @@ This repo contains the **CLI**, **Chrome extension**, and **React SDK** for [Ste
 
 ## Installation
 
+**Quick install** (macOS Apple Silicon, Linux x86_64, Linux aarch64):
+
+```sh
+curl -sSL https://raw.githubusercontent.com/hauju/stepshots/main/install.sh | sh
+```
+
+The script downloads the latest release binary from GitHub into `~/.local/bin` (override with `STEPSHOTS_INSTALL_DIR`). Pin a specific version with `STEPSHOTS_VERSION=v1.0.1`.
+
+**Via Cargo** (any platform with a Rust toolchain):
+
 ```sh
 cargo install stepshots-cli
 ```
