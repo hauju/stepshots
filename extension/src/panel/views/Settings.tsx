@@ -17,9 +17,35 @@ export function Settings() {
   }, []);
 
   const save = async () => {
+    const finalUrl = stepshotsUrl.trim() || "https://stepshots.com";
+
+    // The default stepshots.com hosts are declared in manifest.json. Any other
+    // host (self-hosted / localhost) needs runtime permission so the service
+    // worker can POST to it without hitting CORS.
+    //
+    // chrome.permissions.request requires a user-gesture context, which is
+    // consumed by the first `await` in this handler. Issue the request before
+    // any other awaits.
+    if (!/^https:\/\/(.*\.)?stepshots\.com\/?$/i.test(finalUrl)) {
+      let origin: string;
+      try {
+        origin = new URL(finalUrl).origin + "/*";
+      } catch {
+        setSaveLabel("Invalid URL");
+        setTimeout(() => setSaveLabel("Save Settings"), 2000);
+        return;
+      }
+      const granted = await chrome.permissions.request({ origins: [origin] });
+      if (!granted) {
+        setSaveLabel("Permission required");
+        setTimeout(() => setSaveLabel("Save Settings"), 2000);
+        return;
+      }
+    }
+
     const current = (await sendMessage({ type: "GET_SETTINGS" })) as SettingsT | null;
     const updated: SettingsT = {
-      stepshotsUrl: stepshotsUrl.trim() || "https://stepshots.com",
+      stepshotsUrl: finalUrl,
       apiKey: apiKey.trim() || undefined,
       cliServerUrl: current?.cliServerUrl || "http://localhost:8124",
     };

@@ -25,11 +25,14 @@ export function Setup() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const finalTitle = title.trim() || tab?.title?.trim() || "Untitled";
 
+    // Request access across all sites — recordings often span multiple
+    // domains (OAuth redirects, external links). Per-origin requests would
+    // fail on the first navigation since `chrome.permissions.request` needs
+    // a user gesture and there's none mid-recording.
     if (tab?.url && !tab.url.startsWith("chrome://") && !tab.url.startsWith("chrome-extension://")) {
-      const origin = new URL(tab.url).origin + "/*";
-      const granted = await chrome.permissions.request({ origins: [origin] });
+      const granted = await chrome.permissions.request({ origins: ["<all_urls>"] });
       if (!granted) {
-        setupError.value = "Permission denied. The extension needs access to this site to record.";
+        setupError.value = "Permission denied. The extension needs access to websites to capture screenshots during recording.";
         return;
       }
     }

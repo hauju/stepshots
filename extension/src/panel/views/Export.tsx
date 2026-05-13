@@ -3,6 +3,7 @@ import { generateStepSummary } from "../../utils/step-summary";
 import {
   recordingState,
   sendMessage,
+  settings as settingsSignal,
   uploadResult,
   uploadStatus,
   viewOverride,
@@ -64,14 +65,39 @@ export function Export() {
   };
 
   const upload = async () => {
-    const settingsResult = await sendMessage({ type: "GET_SETTINGS" });
-    if (!settingsResult?.apiKey) {
+    // Read settings synchronously from the signal (pre-loaded at panel boot).
+    // Doing this without awaits is required so chrome.permissions.request below
+    // still has the click's user-gesture token.
+    const currentSettings = settingsSignal.value;
+    if (!currentSettings?.apiKey) {
       uploadStatus.value = {
         message: "Add an API key in Settings to upload directly. You can still download the config below.",
         tone: "error",
         needsApiKey: true,
       };
       return;
+    }
+
+    // If the configured Stepshots URL isn't one of the manifest-declared hosts,
+    // ensure we have runtime host permission for it. Without this, the service
+    // worker's fetch falls back to CORS and fails with "Failed to fetch".
+    const stepshotsUrl = currentSettings.stepshotsUrl || "https://stepshots.com";
+    if (!/^https:\/\/(.*\.)?stepshots\.com\/?$/i.test(stepshotsUrl)) {
+      let originPattern: string;
+      try {
+        originPattern = new URL(stepshotsUrl).origin + "/*";
+      } catch {
+        uploadStatus.value = { message: `Invalid Stepshots URL: ${stepshotsUrl}`, tone: "error" };
+        return;
+      }
+      const granted = await chrome.permissions.request({ origins: [originPattern] });
+      if (!granted) {
+        uploadStatus.value = {
+          message: `Permission required for ${new URL(stepshotsUrl).origin}. Click Upload again and accept the Chrome prompt.`,
+          tone: "error",
+        };
+        return;
+      }
     }
 
     uploadResult.value = null;

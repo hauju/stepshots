@@ -18,6 +18,9 @@ let settings: Settings = { ...DEFAULT_SETTINGS };
 // Screenshots are persisted to IndexedDB so they survive service worker
 // suspension (MV3 evicts the worker after ~30s of inactivity).
 const pendingCaptures = new Set<Promise<void>>();
+// Capture errors collected during the current recording — surfaced in the
+// upload error so silent failures aren't invisible to the user.
+let captureFailures: { key: string; message: string }[] = [];
 
 // Persist state to session storage for service worker restarts
 async function saveState(): Promise<void> {
@@ -89,20 +92,31 @@ function captureScreenshot(key: string, delayMs: number): Promise<void> {
 
     if (!state.isRecording || !state.recordingTabId) return;
 
+    // HIDE_OVERLAYS is best-effort: after a navigation the content script on
+    // the new page may not have re-injected yet, in which case sendMessage
+    // rejects. Don't let that block the actual screenshot capture.
     try {
-      // Ask the content script to hide HUD/toast and wait for repaint confirmation
       await chrome.tabs.sendMessage(state.recordingTabId, { type: "HIDE_OVERLAYS" });
+    } catch {
+      // No content script on the current page yet — overlays aren't visible
+      // either, so it's safe to proceed without the ack.
+    }
 
+    try {
       const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "jpeg", quality: 90 });
       if (dataUrl) {
         await setScreenshot(key, dataUrl);
+      } else {
+        captureFailures.push({ key, message: "captureVisibleTab returned empty" });
       }
-
-      // Restore HUD/toast
-      chrome.tabs.sendMessage(state.recordingTabId, { type: "SHOW_OVERLAYS" }).catch(() => {});
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      captureFailures.push({ key, message });
       console.warn("Screenshot capture failed for", key, err);
     }
+
+    // Restore HUD/toast — also best-effort.
+    chrome.tabs.sendMessage(state.recordingTabId, { type: "SHOW_OVERLAYS" }).catch(() => {});
   })();
 
   pendingCaptures.add(task);
@@ -199,6 +213,7 @@ async function handleMessage(
 
       const url = new URL(tab.url);
       await clearScreenshots();
+      captureFailures = [];
       await ensureContentScript(tab.id);
       // Activate content script and get actual viewport dimensions
       const activateResponse = await sendToContentScript(tab.id, { type: "ACTIVATE_CONTENT_SCRIPT" });
@@ -387,6 +402,15 @@ async function handleMessage(
 
       await waitForPendingCaptures();
       if ((await screenshotCount()) === 0) {
+        if (captureFailures.length > 0) {
+          const sample = captureFailures[captureFailures.length - 1].message;
+          return {
+            error:
+              `No screenshots captured — every capture attempt failed. ` +
+              `Last error: ${sample}. ` +
+              `If recording on a non-stepshots site, make sure the extension has permission for that site.`,
+          };
+        }
         return { error: "No screenshots captured. Please start a new recording." };
       }
 
@@ -417,11 +441,35 @@ async function directUpload(
     formData.append("bundle", new Blob([bundleBytes], { type: "application/zip" }), "bundle.stepshot");
 
     broadcastUploadProgress("upload", "Uploading your demo to Stepshots…");
-    const res = await fetch(`${stepshotsUrl}/api/demos/upload-bundle`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: formData,
-    });
+    const uploadUrl = `${stepshotsUrl}/api/demos/upload-bundle`;
+
+    // Without a granted host permission for this origin, fetches from the
+    // service worker are subject to CORS — and our dashboard returns no CORS
+    // headers, so the request fails with an opaque "Failed to fetch". Detect
+    // this up front so the error message can point the user to the fix.
+    const originPattern = `${new URL(stepshotsUrl).origin}/*`;
+    const hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
+    if (!hasPermission) {
+      return {
+        error:
+          `Host permission not granted for ${new URL(stepshotsUrl).origin}. ` +
+          `Open Settings, re-save your Stepshots URL, and accept the Chrome permission prompt.`,
+      };
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: formData,
+      });
+    } catch (err) {
+      // Network-level failure (host unreachable, TLS error, server not running).
+      return {
+        error: `Could not reach ${uploadUrl}. Is the server running and reachable? (${err})`,
+      };
+    }
 
     if (!res.ok) {
       const text = await res.text();
