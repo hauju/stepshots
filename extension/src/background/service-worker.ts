@@ -3,12 +3,20 @@ import { type RecordingState, type Settings, DEFAULT_STATE, DEFAULT_SETTINGS } f
 import { buildConfig } from "../utils/config-builder";
 import { buildBundle } from "./bundle-builder";
 import { generateStepSummary } from "../utils/step-summary";
+import {
+  setScreenshot,
+  hasScreenshot,
+  deleteScreenshot,
+  clearScreenshots,
+  screenshotCount,
+  loadAllScreenshots,
+} from "./screenshot-store";
 
 let state: RecordingState = { ...DEFAULT_STATE };
 let settings: Settings = { ...DEFAULT_SETTINGS };
 
-// In-memory screenshot store (too large for chrome.storage.session)
-const screenshots = new Map<string, string>(); // stepId -> data URL
+// Screenshots are persisted to IndexedDB so they survive service worker
+// suspension (MV3 evicts the worker after ~30s of inactivity).
 const pendingCaptures = new Set<Promise<void>>();
 
 // Persist state to session storage for service worker restarts
@@ -87,7 +95,7 @@ function captureScreenshot(key: string, delayMs: number): Promise<void> {
 
       const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "jpeg", quality: 90 });
       if (dataUrl) {
-        screenshots.set(key, dataUrl);
+        await setScreenshot(key, dataUrl);
       }
 
       // Restore HUD/toast
@@ -148,10 +156,16 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   return tab ?? null;
 }
 
-// Handle messages from popup and content script
+// Initialize state and settings on service worker start. Held in a promise so
+// message handlers can await hydration before reading state.
+const ready = Promise.all([loadState(), loadSettings()]);
+
+// Handle messages from popup and content script.
+// Always wait for startup hydration before processing, otherwise a message
+// arriving immediately after worker wake-up could read default state.
 chrome.runtime.onMessage.addListener(
   (message: Message, sender, sendResponse) => {
-    handleMessage(message, sender).then(sendResponse);
+    ready.then(() => handleMessage(message, sender)).then(sendResponse);
     return true; // Keep message channel open for async response
   }
 );
@@ -184,7 +198,7 @@ async function handleMessage(
       }
 
       const url = new URL(tab.url);
-      screenshots.clear();
+      await clearScreenshots();
       await ensureContentScript(tab.id);
       // Activate content script and get actual viewport dimensions
       const activateResponse = await sendToContentScript(tab.id, { type: "ACTIVATE_CONTENT_SCRIPT" });
@@ -285,7 +299,7 @@ async function handleMessage(
 
       // Capture screenshot after the action settles when the content script
       // did not already request a pre-action capture for this step.
-      if (!screenshots.has(message.step.id)) {
+      if (!(await hasScreenshot(message.step.id))) {
         const delay = message.step.action === "type" ? 100 : 200;
         captureScreenshot(message.step.id, delay);
       }
@@ -311,7 +325,7 @@ async function handleMessage(
     }
 
     case "DELETE_STEP": {
-      screenshots.delete(message.stepId);
+      await deleteScreenshot(message.stepId);
       state.steps = state.steps.filter((s) => s.id !== message.stepId);
       await saveState();
       broadcastState();
@@ -371,11 +385,11 @@ async function handleMessage(
         return { error: "No API key set. Go to Settings and add your API key." };
       }
 
-      if (screenshots.size === 0) {
+      await waitForPendingCaptures();
+      if ((await screenshotCount()) === 0) {
         return { error: "No screenshots captured. Please start a new recording." };
       }
 
-      await waitForPendingCaptures();
       return await directUpload(state, stepshotsUrl, settings.apiKey);
     }
 
@@ -392,6 +406,7 @@ async function directUpload(
 ): Promise<unknown> {
   try {
     broadcastUploadProgress("bundle", "Packaging your recording into a .stepshot bundle…");
+    const screenshots = await loadAllScreenshots();
     const bundleBytes = buildBundle(recordingState, screenshots, recordingState.viewport);
 
     const formData = new FormData();
@@ -448,7 +463,3 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
 
 // Open side panel when extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-
-// Initialize state and settings on service worker start
-loadState();
-loadSettings();

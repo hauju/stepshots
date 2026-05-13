@@ -153,7 +153,7 @@ export function Export() {
       <p class="panel-intro panel-intro-compact">
         Recommended: upload to Stepshots, then review callouts and sharing in the editor.
       </p>
-      <button class="btn btn-primary btn-lg" onClick={upload} disabled={uploading}>
+      <button class="btn btn-primary btn-lg" onClick={upload} disabled={uploading || !!result}>
         Upload to Stepshots
       </button>
       {result && (
