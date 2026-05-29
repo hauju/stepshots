@@ -83,6 +83,33 @@ function sendHudUpdate(): void {
   chrome.tabs.sendMessage(state.recordingTabId, msg).catch(() => {});
 }
 
+// WebP quality for re-encoded screenshots. The tab is captured losslessly as
+// PNG (captureVisibleTab can't emit WebP), then re-encoded here so bundles ship
+// smaller WebP images without inheriting JPEG compression artifacts.
+const WEBP_QUALITY = 0.85;
+
+// Re-encode a PNG data URL to a WebP data URL via OffscreenCanvas. Runs in the
+// MV3 service worker, where FileReader is unavailable, so the WebP blob is
+// base64-encoded by hand.
+async function pngDataUrlToWebp(pngDataUrl: string): Promise<string> {
+  const pngBlob = await (await fetch(pngDataUrl)).blob();
+  const bitmap = await createImageBitmap(pngBlob);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("OffscreenCanvas 2D context unavailable");
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+
+  const webpBlob = await canvas.convertToBlob({ type: "image/webp", quality: WEBP_QUALITY });
+  const bytes = new Uint8Array(await webpBlob.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return `data:image/webp;base64,${btoa(binary)}`;
+}
+
 // Capture a screenshot of the recording tab
 function captureScreenshot(key: string, delayMs: number): Promise<void> {
   const task = (async () => {
@@ -103,9 +130,9 @@ function captureScreenshot(key: string, delayMs: number): Promise<void> {
     }
 
     try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "jpeg", quality: 90 });
-      if (dataUrl) {
-        await setScreenshot(key, dataUrl);
+      const pngDataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "png" });
+      if (pngDataUrl) {
+        await setScreenshot(key, await pngDataUrlToWebp(pngDataUrl));
       } else {
         captureFailures.push({ key, message: "captureVisibleTab returned empty" });
       }

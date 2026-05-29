@@ -1,6 +1,6 @@
 {
   "name": "stepshots-extension",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "build": "bun run build.ts",

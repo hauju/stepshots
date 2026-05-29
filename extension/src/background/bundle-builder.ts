@@ -39,7 +39,7 @@ export function buildBundle(
     }
 
     const fileIndex = manifestSteps.length;
-    const fileName = `steps/${fileIndex}.jpg`;
+    const fileName = `steps/${fileIndex}.webp`;
     files[fileName] = dataUrlToBytes(dataUrl);
 
     const stepHighlight = buildManifestHighlight(step.targetBounds, step.highlight);
