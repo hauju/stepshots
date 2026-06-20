@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 
-export interface StephotsDemoProps {
+export interface StepshotsDemoProps {
   demoId: string;
   baseUrl?: string;
   autoplay?: boolean;
@@ -24,7 +24,7 @@ export function StepshotsDemo({
   aspectRatio = "16/9",
   style,
   className,
-}: StephotsDemoProps) {
+}: StepshotsDemoProps) {
   const iframeUrl = useMemo(() => {
     const params = new URLSearchParams();
     if (autoplay) params.set("autoplay", "true");

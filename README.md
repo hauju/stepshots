@@ -4,6 +4,8 @@ Open-source tools for recording interactive product demos.
 
 This repo contains the **CLI**, **Chrome extension**, and **React SDK** for [Stepshots](https://stepshots.com) — capture step-by-step screenshots, bundle them into `.stepshot` files, and embed them anywhere.
 
+Learn more on the [CLI page](https://stepshots.com/cli), or read the full [documentation](https://stepshots.com/docs/getting-started/introduction).
+
 ## Installation
 
 **Quick install** (macOS Apple Silicon, Linux x86_64, Linux aarch64):
@@ -58,15 +60,17 @@ stepshots upload output/my-tutorial.stepshot --demo-id <DEMO_ID>
 stepshots upload output/my-tutorial.stepshot --server https://your-instance.com
 ```
 
-Set `STEPSHOTS_TOKEN` for authentication and `STEPSHOTS_SERVER` to override the default server URL.
+Set `STEPSHOTS_TOKEN` for authentication and `STEPSHOTS_SERVER` to override the default server URL. See [API keys](https://stepshots.com/docs/guides/api-keys) to generate a token.
 
 ## Configuration
 
-Tutorials are defined in `stepshots.config.json`. See `stepshots init` for an example.
+Tutorials are defined in `stepshots.config.json`. See `stepshots init` for an example, or the [configuration reference](https://stepshots.com/docs/cli/configuration) for every available option.
 
 ## Chrome Extension
 
 The `extension/` directory contains the Stepshots Recorder — a Chrome extension that records interactions directly in the browser.
+
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/stepshots-recorder/jgpahfgfkmojklbiphnfpklnpchkjhpd), or build it from source:
 
 ```sh
 cd extension
@@ -74,7 +78,7 @@ bun install
 bun run build
 ```
 
-Load the `extension/` folder as an unpacked extension in `chrome://extensions`.
+Then load the `extension/` folder as an unpacked extension in `chrome://extensions`.
 
 ## React SDK
 
@@ -88,11 +92,11 @@ import { StepshotsDemo } from "@stepshots/react";
 <StepshotsDemo demoId="your-demo-id" />
 ```
 
-See [`packages/react/`](packages/react/) for full props documentation.
+See [`packages/react/`](packages/react/) or the [React SDK guide](https://stepshots.com/docs/guides/react-sdk) for full props documentation.
 
 ## Embed Examples
 
-The `examples/` directory has ready-to-use HTML files showing how to embed Stepshots demos:
+The `examples/` directory has ready-to-use HTML files showing how to embed Stepshots demos (see the [embedding guide](https://stepshots.com/docs/guides/embedding)):
 
 - **`embed-js-snippet.html`** — Lightweight JS snippet integration
 - **`embed-web-component.html`** — `<stepshots-demo>` web component
@@ -106,6 +110,13 @@ The `examples/` directory has ready-to-use HTML files showing how to embed Steps
 - **`packages/react/`** — React component (`@stepshots/react`)
 - **`examples/`** — Embed integration examples
 - **`skills/`** — Claude Code skills for AI-assisted demo creation
+
+## Documentation
+
+- **Website:** [stepshots.com](https://stepshots.com)
+- **CLI page:** [stepshots.com/cli](https://stepshots.com/cli)
+- **Docs:** [Getting started](https://stepshots.com/docs/getting-started/introduction) and [CLI reference](https://stepshots.com/docs/cli/installation)
+- **Blog:** [Guides and comparisons](https://stepshots.com/blog)
 
 ## License
 

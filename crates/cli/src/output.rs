@@ -38,6 +38,20 @@ pub struct StepOutput {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Annotations that could not be anchored when this step was recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotation_warnings: Option<Vec<AnnotationWarning>>,
+}
+
+/// An annotation that failed to anchor onto a recorded step.
+#[derive(Serialize)]
+pub struct AnnotationWarning {
+    /// Which annotation type drifted: highlight | blur | arrow | hotspot | popup | zoom.
+    pub kind: &'static str,
+    /// The CSS selector that was supposed to anchor it.
+    pub selector: String,
+    /// Why it drifted: "orphaned" (element no longer exists) or "off_screen".
+    pub reason: &'static str,
 }
 
 /// JSON output for `inspect --json`.

@@ -3,7 +3,7 @@ use std::path::Path;
 use indicatif::{ProgressBar, ProgressStyle};
 use manifest::{
     ArrowPointer, BundleManifest, BundleManifestStep, ElementBounds, HighlightEntry,
-    HotspotIndicator, PopupIndicator, StepConfig, Viewport, ZoomRegion, resolve_viewport,
+    HotspotIndicator, Point2D, PopupIndicator, StepConfig, Viewport, ZoomRegion, resolve_viewport,
 };
 
 use crate::actions::execute_action;
@@ -11,7 +11,7 @@ use crate::browser::Browser;
 use crate::bundler::create_bundle;
 use crate::config::{StepshotsConfig, TutorialConfig};
 use crate::error::CliError;
-use crate::output::{RecordOutput, StepOutput, TutorialOutput};
+use crate::output::{AnnotationWarning, RecordOutput, StepOutput, TutorialOutput};
 
 /// Record one or more tutorials into `.stepshot` bundles.
 pub async fn run(
@@ -145,6 +145,8 @@ pub async fn record_tutorial(
     let mut screenshots: Vec<Vec<u8>> = Vec::with_capacity(step_count);
     let mut manifest_steps: Vec<BundleManifestStep> = Vec::with_capacity(step_count);
     let mut step_results: Vec<StepOutput> = Vec::with_capacity(step_count);
+    // Annotations whose anchors drifted (element gone or off-screen) during recording.
+    let mut drift: Vec<AnnotationDrift> = Vec::new();
     // Transition frames keyed by step index (0-based, matching screenshot index)
     let mut all_transition_frames: std::collections::HashMap<usize, Vec<Vec<u8>>> =
         std::collections::HashMap::new();
@@ -157,34 +159,19 @@ pub async fn record_tutorial(
             step.selector.as_deref().unwrap_or("")
         ));
 
+        let drift_start = drift.len();
+
         wait_for_step_target(&browser, step).await?;
         let capture_before_action = should_capture_before_action(step);
         restore_scene_scroll(&browser, step).await?;
 
-        let (
-            scene_url,
-            step_highlight,
-            step_blurs,
-            step_arrows,
-            step_hotspots,
-            step_popups,
-            step_zooms,
-        ) = if capture_before_action {
-            let scene_url = get_current_url(&browser).await;
-            (
-                scene_url,
-                resolve_highlight(&browser, step, viewport, i + 1).await?,
-                resolve_blur_regions(&browser, step, viewport, i + 1).await?,
-                resolve_arrows(&browser, step, viewport, i + 1).await?,
-                resolve_hotspots(&browser, step, viewport, i + 1).await?,
-                resolve_popups(&browser, step, viewport, i + 1).await?,
-                resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
-            )
-        } else {
-            (None, None, vec![], vec![], vec![], vec![], vec![])
-        };
-
+        // For click/navigate we capture the scene (and resolve overlays) BEFORE the
+        // action fires; for everything else we capture AFTER it settles.
+        let mut scene_url = None;
+        let mut overlays = ResolvedOverlays::default();
         if capture_before_action {
+            scene_url = get_current_url(&browser).await;
+            overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
             let png = browser.screenshot().await?;
             screenshots.push(png);
         }
@@ -199,40 +186,21 @@ pub async fn record_tutorial(
             browser.wait_idle(delay).await;
         }
 
-        let (
-            scene_url,
-            step_highlight,
-            step_blurs,
-            step_arrows,
-            step_hotspots,
-            step_popups,
-            step_zooms,
-        ) = if capture_before_action {
-            (
-                scene_url,
-                step_highlight,
-                step_blurs,
-                step_arrows,
-                step_hotspots,
-                step_popups,
-                step_zooms,
-            )
-        } else {
-            let scene_url = get_current_url(&browser).await;
-            let overlays = (
-                resolve_highlight(&browser, step, viewport, i + 1).await?,
-                resolve_blur_regions(&browser, step, viewport, i + 1).await?,
-                resolve_arrows(&browser, step, viewport, i + 1).await?,
-                resolve_hotspots(&browser, step, viewport, i + 1).await?,
-                resolve_popups(&browser, step, viewport, i + 1).await?,
-                resolve_zoom_regions(&browser, step, viewport, i + 1).await?,
-            );
+        if !capture_before_action {
+            scene_url = get_current_url(&browser).await;
+            overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
             let png = browser.screenshot().await?;
             screenshots.push(png);
-            (
-                scene_url, overlays.0, overlays.1, overlays.2, overlays.3, overlays.4, overlays.5,
-            )
-        };
+        }
+
+        let ResolvedOverlays {
+            highlight: step_highlight,
+            blurs: step_blurs,
+            arrows: step_arrows,
+            hotspots: step_hotspots,
+            popups: step_popups,
+            zooms: step_zooms,
+        } = overlays;
 
         // Build transition frame paths and store the frame data
         let step_idx = i;
@@ -302,19 +270,43 @@ pub async fn record_tutorial(
             transition_frames: transition_frame_paths,
         });
 
+        let step_warnings: Vec<AnnotationWarning> =
+            drift[drift_start..].iter().map(AnnotationDrift::to_output).collect();
         step_results.push(StepOutput {
             index: i,
             name: step.name.clone(),
             action: step.action.clone(),
             selector: step.selector.clone(),
-            status: "ok",
+            status: if step_warnings.is_empty() { "ok" } else { "drift" },
             error: None,
+            annotation_warnings: if step_warnings.is_empty() {
+                None
+            } else {
+                Some(step_warnings)
+            },
         });
 
         pb.inc(1);
     }
 
     pb.finish_with_message("done");
+
+    if !json && !drift.is_empty() {
+        eprintln!(
+            "  \u{26a0} {} annotation(s) drifted during recording:",
+            drift.len()
+        );
+        for d in &drift {
+            eprintln!(
+                "    - Step {} \"{}\": {} target \"{}\" {}",
+                d.step_num,
+                d.step_name,
+                d.kind,
+                d.selector,
+                d.reason.describe()
+            );
+        }
+    }
 
     // Build manifest and bundle
     let manifest = BundleManifest {
@@ -402,12 +394,115 @@ fn is_point_visible(x: f64, y: f64, viewport: &Viewport) -> bool {
     x >= 0.0 && y >= 0.0 && x <= viewport.width as f64 && y <= viewport.height as f64
 }
 
+/// Why an annotation could not be anchored onto a recorded step.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DriftReason {
+    /// The selector matched nothing — the element no longer exists on the page.
+    Orphaned,
+    /// The element was found but resolved outside the captured viewport.
+    OffScreen,
+}
+
+impl DriftReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            DriftReason::Orphaned => "orphaned",
+            DriftReason::OffScreen => "off_screen",
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            DriftReason::Orphaned => "no longer exists (element not found)",
+            DriftReason::OffScreen => "resolved off-screen",
+        }
+    }
+}
+
+/// A single annotation whose anchor drifted during recording.
+struct AnnotationDrift {
+    step_num: usize,
+    step_name: String,
+    kind: &'static str,
+    selector: String,
+    reason: DriftReason,
+}
+
+impl AnnotationDrift {
+    fn to_output(&self) -> AnnotationWarning {
+        AnnotationWarning {
+            kind: self.kind,
+            selector: self.selector.clone(),
+            reason: self.reason.as_str(),
+        }
+    }
+}
+
+/// Classify resolved bounds: `None` element (selector matched nothing) → orphaned;
+/// found but off-viewport → off-screen; visible → `None` (renders fine).
+fn classify_bounds(bounds: Option<&ElementBounds>, viewport: &Viewport) -> Option<DriftReason> {
+    match bounds {
+        None => Some(DriftReason::Orphaned),
+        Some(b) if is_bounds_visible(b, viewport) => None,
+        Some(_) => Some(DriftReason::OffScreen),
+    }
+}
+
+/// Point equivalent of [`classify_bounds`].
+fn classify_point(point: Option<&Point2D>, viewport: &Viewport) -> Option<DriftReason> {
+    match point {
+        None => Some(DriftReason::Orphaned),
+        Some(p) if is_point_visible(p.x, p.y, viewport) => None,
+        Some(_) => Some(DriftReason::OffScreen),
+    }
+}
+
+fn step_name(step: &StepConfig) -> String {
+    step.name.as_deref().unwrap_or("").to_string()
+}
+
+/// All overlays resolved for a single step's scene.
+#[derive(Default)]
+struct ResolvedOverlays {
+    highlight: Option<HighlightEntry>,
+    blurs: Vec<ElementBounds>,
+    arrows: Vec<ArrowPointer>,
+    hotspots: Vec<HotspotIndicator>,
+    popups: Vec<PopupIndicator>,
+    zooms: Vec<ZoomRegion>,
+}
+
+/// Resolve every annotation kind for a step, recording any drift into `drift`.
+async fn resolve_overlays(
+    browser: &Browser,
+    step: &StepConfig,
+    viewport: &Viewport,
+    step_num: usize,
+    drift: &mut Vec<AnnotationDrift>,
+) -> Result<ResolvedOverlays, CliError> {
+    let highlight = resolve_highlight(browser, step, viewport, step_num, drift).await?;
+    let blurs = resolve_blur_regions(browser, step, viewport, step_num, drift).await?;
+    let arrows = resolve_arrows(browser, step, viewport, step_num, drift).await?;
+    let hotspots = resolve_hotspots(browser, step, viewport, step_num, drift).await?;
+    let popups = resolve_popups(browser, step, viewport, step_num, drift).await?;
+    let zooms = resolve_zoom_regions(browser, step, viewport, step_num, drift).await?;
+    Ok(ResolvedOverlays {
+        highlight,
+        blurs,
+        arrows,
+        hotspots,
+        popups,
+        zooms,
+    })
+}
+
 /// Resolve highlight config into a HighlightEntry with element bounds.
 async fn resolve_highlight(
     browser: &Browser,
     step: &manifest::StepConfig,
     viewport: &Viewport,
     step_num: usize,
+    drift: &mut Vec<AnnotationDrift>,
 ) -> Result<Option<HighlightEntry>, CliError> {
     if step.highlights.is_empty() {
         return Ok(None);
@@ -415,6 +510,7 @@ async fn resolve_highlight(
     let ann_cfg = &step.highlights[0];
     let explicit_bounds = ann_cfg.bounds.clone();
     let sel = step.highlight_selector.as_ref().or(step.selector.as_ref());
+    // Explicit pixel bounds win; otherwise resolve the selector live (None == element gone).
     let bounds = if explicit_bounds.is_some() {
         explicit_bounds
     } else if let Some(sel) = sel {
@@ -422,6 +518,16 @@ async fn resolve_highlight(
     } else {
         None
     };
+    if let Some(reason) = classify_bounds(bounds.as_ref(), viewport) {
+        drift.push(AnnotationDrift {
+            step_num,
+            step_name: step_name(step),
+            kind: "highlight",
+            selector: sel.map(|s| s.to_string()).unwrap_or_else(|| "(none)".to_string()),
+            reason,
+        });
+        return Ok(None);
+    }
     let bounds = bounds.unwrap_or(manifest::ElementBounds {
         x: 0.0,
         y: 0.0,
@@ -429,14 +535,6 @@ async fn resolve_highlight(
         height: 0.0,
         z_index: None,
     });
-    if !is_bounds_visible(&bounds, viewport) {
-        let sel_str = sel.map(|s| s.as_str()).unwrap_or("(none)");
-        eprintln!(
-            "  \u{26a0} Step {step_num} \"{}\": highlight selector \"{sel_str}\" resolved off-screen, skipping",
-            step.name.as_deref().unwrap_or("")
-        );
-        return Ok(None);
-    }
     Ok(Some(HighlightEntry {
         bounds,
         callout: ann_cfg.callout.clone(),
@@ -464,19 +562,24 @@ async fn resolve_blur_regions(
     step: &StepConfig,
     viewport: &Viewport,
     step_num: usize,
+    drift: &mut Vec<AnnotationDrift>,
 ) -> Result<Vec<ElementBounds>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.blur_regions {
-        if let Some(bounds) = browser.get_bounds(&cfg.selector).await? {
-            if is_bounds_visible(&bounds, viewport) {
-                results.push(bounds);
-            } else {
-                eprintln!(
-                    "  \u{26a0} Step {step_num} \"{}\": blur selector \"{}\" resolved off-screen, skipping",
-                    step.name.as_deref().unwrap_or(""),
-                    cfg.selector
-                );
+        let bounds = browser.get_bounds(&cfg.selector).await?;
+        match classify_bounds(bounds.as_ref(), viewport) {
+            None => {
+                if let Some(bounds) = bounds {
+                    results.push(bounds);
+                }
             }
+            Some(reason) => drift.push(AnnotationDrift {
+                step_num,
+                step_name: step_name(step),
+                kind: "blur",
+                selector: cfg.selector.clone(),
+                reason,
+            }),
         }
     }
     Ok(results)
@@ -487,34 +590,47 @@ async fn resolve_arrows(
     step: &StepConfig,
     viewport: &Viewport,
     step_num: usize,
+    drift: &mut Vec<AnnotationDrift>,
 ) -> Result<Vec<ArrowPointer>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.arrows {
         let from = browser.get_element_center(&cfg.from_selector).await?;
         let to = browser.get_element_center(&cfg.to_selector).await?;
-        if let (Some(from), Some(to)) = (from, to) {
-            if !is_point_visible(from.x, from.y, viewport)
-                || !is_point_visible(to.x, to.y, viewport)
-            {
-                eprintln!(
-                    "  \u{26a0} Step {step_num} \"{}\": arrow endpoint resolved off-screen, skipping",
-                    step.name.as_deref().unwrap_or("")
-                );
-                continue;
+        let from_drift = classify_point(from.as_ref(), viewport);
+        let to_drift = classify_point(to.as_ref(), viewport);
+        match (from, to) {
+            (Some(from), Some(to)) if from_drift.is_none() && to_drift.is_none() => {
+                results.push(ArrowPointer {
+                    from,
+                    to,
+                    color: cfg.color.clone(),
+                    stroke_width: cfg.stroke_width,
+                    curvature: cfg.curvature,
+                    text: None,
+                    font_size: None,
+                    animation: None,
+                    delay: None,
+                    duration: None,
+                    z_index: None,
+                });
             }
-            results.push(ArrowPointer {
-                from,
-                to,
-                color: cfg.color.clone(),
-                stroke_width: cfg.stroke_width,
-                curvature: cfg.curvature,
-                text: None,
-                font_size: None,
-                animation: None,
-                delay: None,
-                duration: None,
-                z_index: None,
-            });
+            _ => {
+                // Record drift for each endpoint that failed to anchor.
+                for (selector, reason) in [
+                    (&cfg.from_selector, from_drift),
+                    (&cfg.to_selector, to_drift),
+                ] {
+                    if let Some(reason) = reason {
+                        drift.push(AnnotationDrift {
+                            step_num,
+                            step_name: step_name(step),
+                            kind: "arrow",
+                            selector: selector.clone(),
+                            reason,
+                        });
+                    }
+                }
+            }
         }
     }
     Ok(results)
@@ -525,28 +641,33 @@ async fn resolve_hotspots(
     step: &StepConfig,
     viewport: &Viewport,
     step_num: usize,
+    drift: &mut Vec<AnnotationDrift>,
 ) -> Result<Vec<HotspotIndicator>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.hotspots {
-        if let Some(center) = browser.get_element_center(&cfg.selector).await? {
-            if !is_point_visible(center.x, center.y, viewport) {
-                eprintln!(
-                    "  \u{26a0} Step {step_num} \"{}\": hotspot selector \"{}\" resolved off-screen, skipping",
-                    step.name.as_deref().unwrap_or(""),
-                    cfg.selector
-                );
-                continue;
+        let center = browser.get_element_center(&cfg.selector).await?;
+        match classify_point(center.as_ref(), viewport) {
+            None => {
+                if let Some(center) = center {
+                    results.push(HotspotIndicator {
+                        x: center.x,
+                        y: center.y,
+                        color: cfg.color.clone(),
+                        size: cfg.size,
+                        callout: cfg.callout.clone(),
+                        position: cfg.position.clone(),
+                        is_click_target: cfg.is_click_target,
+                        z_index: None,
+                    });
+                }
             }
-            results.push(HotspotIndicator {
-                x: center.x,
-                y: center.y,
-                color: cfg.color.clone(),
-                size: cfg.size,
-                callout: cfg.callout.clone(),
-                position: cfg.position.clone(),
-                is_click_target: cfg.is_click_target,
-                z_index: None,
-            });
+            Some(reason) => drift.push(AnnotationDrift {
+                step_num,
+                step_name: step_name(step),
+                kind: "hotspot",
+                selector: cfg.selector.clone(),
+                reason,
+            }),
         }
     }
     Ok(results)
@@ -557,41 +678,49 @@ async fn resolve_popups(
     step: &StepConfig,
     viewport: &Viewport,
     step_num: usize,
+    drift: &mut Vec<AnnotationDrift>,
 ) -> Result<Vec<PopupIndicator>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.popups {
-        if let Some(center) = browser.get_element_center(&cfg.selector).await? {
-            if !is_point_visible(center.x, center.y, viewport) {
-                eprintln!(
-                    "  \u{26a0} Step {step_num} \"{}\": popup selector \"{}\" resolved off-screen, skipping",
-                    step.name.as_deref().unwrap_or(""),
-                    cfg.selector
-                );
+        let center = browser.get_element_center(&cfg.selector).await?;
+        let center = match classify_point(center.as_ref(), viewport) {
+            None => match center {
+                Some(center) => center,
+                None => continue,
+            },
+            Some(reason) => {
+                drift.push(AnnotationDrift {
+                    step_num,
+                    step_name: step_name(step),
+                    kind: "popup",
+                    selector: cfg.selector.clone(),
+                    reason,
+                });
                 continue;
             }
-            results.push(PopupIndicator {
-                x: center.x,
-                y: center.y,
-                title: cfg.title.clone(),
-                body: cfg.body.clone(),
-                width: cfg.width,
-                color: cfg.color.clone(),
-                text_color: cfg.text_color.clone(),
-                style: cfg.style.clone(),
-                variant: cfg.variant.clone(),
-                size: cfg.size.clone(),
-                border_radius: None,
-                animation: Some("fade-up".to_string()),
-                delay: Some(150),
-                duration: Some(450),
-                dismissible: None,
-                is_click_target: None,
-                button_text: cfg.button_text.clone(),
-                button_url: cfg.button_url.clone(),
-                open_in_new_tab: cfg.open_in_new_tab,
-                z_index: None,
-            });
-        }
+        };
+        results.push(PopupIndicator {
+            x: center.x,
+            y: center.y,
+            title: cfg.title.clone(),
+            body: cfg.body.clone(),
+            width: cfg.width,
+            color: cfg.color.clone(),
+            text_color: cfg.text_color.clone(),
+            style: cfg.style.clone(),
+            variant: cfg.variant.clone(),
+            size: cfg.size.clone(),
+            border_radius: None,
+            animation: Some("fade-up".to_string()),
+            delay: Some(150),
+            duration: Some(450),
+            dismissible: None,
+            is_click_target: None,
+            button_text: cfg.button_text.clone(),
+            button_url: cfg.button_url.clone(),
+            open_in_new_tab: cfg.open_in_new_tab,
+            z_index: None,
+        });
     }
     Ok(results)
 }
@@ -601,25 +730,30 @@ async fn resolve_zoom_regions(
     step: &StepConfig,
     viewport: &Viewport,
     step_num: usize,
+    drift: &mut Vec<AnnotationDrift>,
 ) -> Result<Vec<ZoomRegion>, CliError> {
     let mut results = Vec::new();
     for cfg in &step.zoom_regions {
-        if let Some(bounds) = browser.get_bounds(&cfg.selector).await? {
-            if is_bounds_visible(&bounds, viewport) {
-                results.push(ZoomRegion {
-                    bounds,
-                    magnification: cfg.magnification,
-                    delay: cfg.delay,
-                    duration: cfg.duration,
-                    z_index: None,
-                });
-            } else {
-                eprintln!(
-                    "  \u{26a0} Step {step_num} \"{}\": zoom selector \"{}\" resolved off-screen, skipping",
-                    step.name.as_deref().unwrap_or(""),
-                    cfg.selector
-                );
+        let bounds = browser.get_bounds(&cfg.selector).await?;
+        match classify_bounds(bounds.as_ref(), viewport) {
+            None => {
+                if let Some(bounds) = bounds {
+                    results.push(ZoomRegion {
+                        bounds,
+                        magnification: cfg.magnification,
+                        delay: cfg.delay,
+                        duration: cfg.duration,
+                        z_index: None,
+                    });
+                }
             }
+            Some(reason) => drift.push(AnnotationDrift {
+                step_num,
+                step_name: step_name(step),
+                kind: "zoom",
+                selector: cfg.selector.clone(),
+                reason,
+            }),
         }
     }
     Ok(results)
@@ -636,5 +770,64 @@ fn resolve_url(base: &str, path: &str) -> String {
             format!("/{path}")
         };
         format!("{base}{path}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn viewport() -> Viewport {
+        Viewport {
+            width: 1280,
+            height: 800,
+            device_scale_factor: None,
+        }
+    }
+
+    fn bounds(x: f64, y: f64, w: f64, h: f64) -> ElementBounds {
+        ElementBounds {
+            x,
+            y,
+            width: w,
+            height: h,
+            z_index: None,
+        }
+    }
+
+    #[test]
+    fn missing_element_is_orphaned() {
+        // A selector that resolved to nothing (None) means the element is gone.
+        assert_eq!(classify_bounds(None, &viewport()), Some(DriftReason::Orphaned));
+        assert_eq!(classify_point(None, &viewport()), Some(DriftReason::Orphaned));
+    }
+
+    #[test]
+    fn visible_element_does_not_drift() {
+        let b = bounds(100.0, 100.0, 50.0, 20.0);
+        assert_eq!(classify_bounds(Some(&b), &viewport()), None);
+        let p = Point2D { x: 100.0, y: 100.0 };
+        assert_eq!(classify_point(Some(&p), &viewport()), None);
+    }
+
+    #[test]
+    fn found_but_off_viewport_is_off_screen() {
+        // Element exists but resolved past the right/bottom edge.
+        let b = bounds(2000.0, 100.0, 50.0, 20.0);
+        assert_eq!(
+            classify_bounds(Some(&b), &viewport()),
+            Some(DriftReason::OffScreen)
+        );
+        let p = Point2D { x: 100.0, y: 2000.0 };
+        assert_eq!(
+            classify_point(Some(&p), &viewport()),
+            Some(DriftReason::OffScreen)
+        );
+    }
+
+    #[test]
+    fn reason_serializes_to_stable_strings() {
+        assert_eq!(DriftReason::Orphaned.as_str(), "orphaned");
+        assert_eq!(DriftReason::OffScreen.as_str(), "off_screen");
     }
 }

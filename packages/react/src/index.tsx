@@ -1,2 +1,2 @@
 export { StepshotsDemo } from "./StepshotsDemo";
-export type { StephotsDemoProps } from "./StepshotsDemo";
+export type { StepshotsDemoProps } from "./StepshotsDemo";
