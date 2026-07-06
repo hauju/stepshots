@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use console::style;
@@ -10,6 +11,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const GITHUB_REPO: &str = "hauju/stepshots";
 const CARGO_INSTALL_URL: &str = "https://github.com/hauju/stepshots.git";
 const PACKAGE_NAME: &str = "stepshots-cli";
+const INSTALL_SH_URL: &str = "https://raw.githubusercontent.com/hauju/stepshots/main/install.sh";
 
 pub async fn run(force: bool, check_only: bool) -> Result<(), CliError> {
     let current = Version::parse(CURRENT_VERSION)
@@ -67,8 +69,6 @@ pub async fn run(force: bool, check_only: bool) -> Result<(), CliError> {
 }
 
 async fn do_install(current: &str, latest: Option<&str>) -> Result<(), CliError> {
-    verify_cargo_available()?;
-
     let target = latest.unwrap_or(current);
     println!(
         "  {} Upgrading stepshots... v{} → v{}",
@@ -77,15 +77,28 @@ async fn do_install(current: &str, latest: Option<&str>) -> Result<(), CliError>
         target,
     );
 
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
-            .expect("valid template"),
-    );
-    spinner.set_message("Compiling from source (this may take a minute)...");
-    spinner.enable_steady_tick(Duration::from_millis(100));
+    // Cargo installs are upgraded from source; binary installs (via install.sh)
+    // pull the matching prebuilt release. Windows only ships via cargo.
+    if installed_via_cargo() || cfg!(not(unix)) {
+        upgrade_via_cargo().await?;
+    } else {
+        upgrade_via_installer(latest).await?;
+    }
 
+    println!(
+        "  {} Successfully upgraded to stepshots v{}",
+        style("✓").green().bold(),
+        target,
+    );
+
+    Ok(())
+}
+
+/// Upgrade a source install with `cargo install --git`.
+async fn upgrade_via_cargo() -> Result<(), CliError> {
+    verify_cargo_available()?;
+
+    let spinner = new_spinner("Compiling from source (this may take a minute)...");
     let output = tokio::process::Command::new("cargo")
         .args([
             "install",
@@ -97,7 +110,6 @@ async fn do_install(current: &str, latest: Option<&str>) -> Result<(), CliError>
         .output()
         .await
         .map_err(|e| CliError::Upgrade(format!("Failed to run cargo install: {e}")))?;
-
     spinner.finish_and_clear();
 
     if !output.status.success() {
@@ -107,13 +119,82 @@ async fn do_install(current: &str, latest: Option<&str>) -> Result<(), CliError>
         )));
     }
 
-    println!(
-        "  {} Successfully upgraded to stepshots v{}",
-        style("✓").green().bold(),
-        target,
-    );
+    Ok(())
+}
+
+/// Upgrade a binary install by re-running install.sh, which downloads the
+/// matching prebuilt release into the current binary's directory.
+async fn upgrade_via_installer(version: Option<&str>) -> Result<(), CliError> {
+    let exe = std::env::current_exe().map_err(|e| {
+        CliError::Upgrade(format!("could not locate the stepshots executable: {e}"))
+    })?;
+    let install_dir = exe
+        .parent()
+        .ok_or_else(|| CliError::Upgrade("could not determine the install directory".into()))?;
+
+    let spinner = new_spinner("Downloading the latest release...");
+
+    // Force install.sh's temp dir onto the same filesystem as the destination so
+    // its final `mv` is an atomic rename() — overwriting the running binary via a
+    // cross-filesystem copy would otherwise fail with ETXTBSY on Linux. mktemp
+    // honours TMPDIR. `set -e` + assignment ensures a curl failure aborts before
+    // the download is piped into sh.
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(format!(
+            "set -e; script=\"$(curl -fsSL {INSTALL_SH_URL})\"; printf %s \"$script\" | sh"
+        ))
+        .env("STEPSHOTS_INSTALL_DIR", install_dir)
+        .env("TMPDIR", install_dir);
+    if let Some(v) = version {
+        cmd.env("STEPSHOTS_VERSION", format!("v{v}"));
+    }
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| CliError::Upgrade(format!("failed to run the installer: {e}")))?;
+    spinner.finish_and_clear();
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CliError::Upgrade(format!(
+            "installer failed:\n{}",
+            stderr.trim()
+        )));
+    }
 
     Ok(())
+}
+
+/// Whether the running binary lives in Cargo's bin directory.
+fn installed_via_cargo() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let cargo_bin = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|h| h.join(".cargo")))
+        .map(|c| c.join("bin"));
+    matches!(cargo_bin, Some(dir) if exe.starts_with(&dir))
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+fn new_spinner(message: &str) -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .expect("valid template"),
+    );
+    spinner.set_message(message.to_string());
+    spinner.enable_steady_tick(Duration::from_millis(100));
+    spinner
 }
 
 async fn fetch_latest_version() -> Result<String, CliError> {

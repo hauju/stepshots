@@ -18,7 +18,7 @@ manifest = { path = "../manifest", version = "1.0.1", package = "stepshots-manif
 clap = { version = "4", features = ["derive", "env"] }
 
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "net", "io-util"] }
 futures = "0.3"
 
 # Browser automation
@@ -53,3 +53,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dotenvy = "0.15.7"
 semver = "1"
+
+# CLI login (OAuth PKCE loopback flow)
+open = "5"
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"

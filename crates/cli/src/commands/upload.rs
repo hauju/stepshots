@@ -62,7 +62,10 @@ pub async fn run(
                 .await?;
 
             if resp.status().is_success() {
-                let view_url = format!("{}/demos/{demo_id}", server_url.trim_end_matches('/'));
+                let view_url = format!(
+                    "{}/dashboard/demos/{demo_id}",
+                    server_url.trim_end_matches('/')
+                );
                 println!("  Replaced! Demo ID: {demo_id}");
                 println!("  View at: {view_url}");
                 results.push(UploadResult {
@@ -127,7 +130,10 @@ pub async fn run(
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| CliError::Upload("API response missing 'id' field".into()))?
                     .to_string();
-                let view_url = format!("{}/demos/{demo_id}", server_url.trim_end_matches('/'));
+                let view_url = format!(
+                    "{}/dashboard/demos/{demo_id}",
+                    server_url.trim_end_matches('/')
+                );
                 println!("  Uploaded! Demo ID: {demo_id}");
                 println!("  View at: {view_url}");
                 results.push(UploadResult { demo_id, view_url });

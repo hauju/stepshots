@@ -1,12 +1,13 @@
 ---
 name: stepshots-cli-record
 description: |
-  Create screenshot-based product demos using Stepshots from natural-language flow descriptions.
-  Use when a user wants to record a clickthrough demo, generate or edit
-  stepshots.config.json, or turn an existing saved Stepshots demo into a CLI recording config.
-  Works for both CLI-first and AI-assisted workflows.
+  Create, record, and publish screenshot-based product demos with the Stepshots CLI from
+  natural-language flow descriptions. Use when a user wants to record a clickthrough demo
+  or product tour, generate or edit stepshots.config.json, upload/publish a demo for
+  sharing or embedding, keep a demo fresh from CI, or turn an existing saved Stepshots
+  demo into a CLI recording config. Works for both CLI-first and AI-assisted workflows.
 author: Hauke Jung
-version: 2.0.0
+version: 2.1.0
 ---
 
 # Stepshots CLI Screenshot Demo Skill
@@ -20,16 +21,54 @@ This skill is adapted to the current product model:
 - `Capture Screen` creates a screenshot-only step
 - old auto-recorded navigation assumptions are no longer the recommended model
 
-## What Codex Should Do
+## What You Should Do
 
-When using this skill, Codex should:
+When using this skill, you should:
 
 1. Understand the flow the user wants to show.
 2. Prefer a clean clickthrough sequence over trying to show every intermediate UI motion.
 3. Generate or update `stepshots.config.json`.
 4. Prefer `click`, `type`, `select`, `key`, `wait`, and explicit scene captures.
 5. Use the CLI to preview, validate, and record.
-6. If the user already has a saved demo, export or reconstruct a CLI config from that demo when possible.
+6. Upload the result so the user gets a shareable, embeddable demo — recording without
+   publishing leaves the job half done.
+7. If the user already has a saved demo, export or reconstruct a CLI config from that demo when possible.
+
+## End-to-End Workflow
+
+The full loop from nothing to a published demo:
+
+```bash
+stepshots login                          # once per machine (browser OAuth, token stored locally)
+stepshots init                           # scaffold stepshots.config.json (skip if one exists)
+stepshots inspect https://example.com --json   # discover selectors
+# ... generate/edit the config ...
+stepshots record --dry-run --json        # validate config structure
+stepshots record -t tutorial-key --json  # record to output/<key>.stepshot
+stepshots upload output/tutorial-key.stepshot  # create demo, prints the demo URL
+```
+
+Uploaded demos start private. The user publishes, edits overlays, and gets embed code
+(iframe / JS snippet / React SDK / web component) from the dashboard.
+
+To update an existing demo in place — keeping its URL, embeds, and analytics — re-record
+and upload with `--demo-id`:
+
+```bash
+stepshots upload output/tutorial-key.stepshot --demo-id <existing-id>
+```
+
+## Authentication
+
+- `stepshots login` — opens the browser, completes OAuth, stores an API token locally.
+  Recommended for interactive use.
+- `stepshots whoami` — verifies the stored (or passed) token and shows the account.
+  Run this to diagnose auth errors before retrying an upload.
+- `stepshots logout` — removes stored credentials.
+
+Token precedence for `upload`: `--token` flag / `STEPSHOTS_TOKEN` env var, then the
+stored login token. In CI, set `STEPSHOTS_TOKEN` as a secret instead of logging in.
+`--server` / `STEPSHOTS_SERVER` overrides the server URL (defaults to `https://stepshots.com`).
 
 ## Product Model
 
@@ -95,7 +134,7 @@ When describing extension workflows to users, explain it in exactly those terms.
 ```json
 {
   "baseUrl": "https://example.com",
-  "viewport": { "width": 1280, "height": 800 },
+  "format": "desktop",
   "defaultDelay": 500,
   "tutorials": {
     "getting-started": {
@@ -107,6 +146,35 @@ When describing extension workflows to users, explain it in exactly those terms.
   }
 }
 ```
+
+### Viewport Formats
+
+Prefer a named `format` over raw pixel dimensions:
+
+| Format | Dimensions | Use For |
+|---|---|---|
+| `desktop-hd` | 1920×1080 | Hero demos, landing pages |
+| `desktop` | 1280×800 | Default docs/README demos |
+| `tablet-landscape` | 1024×768 | Tablet UIs |
+| `tablet-portrait` | 768×1024 | Tablet UIs |
+| `mobile` | 390×844 | Mobile flows |
+| `mobile-landscape` | 844×390 | Mobile landscape |
+| `square` | 1080×1080 | Social embeds |
+
+A raw `"viewport": { "width": ..., "height": ... }` is still supported for custom sizes;
+when both are present, `format` wins.
+
+### Environment Variables in Configs
+
+All string values support `${VAR}` interpolation, resolved at load time:
+
+```json
+{ "action": "type", "selector": "#password", "text": "${DEMO_PASSWORD}" }
+```
+
+Use this for credentials and environment-specific URLs so secrets never land in the
+repo — and blur the affected fields (see Blur Regions) since typed values appear in
+screenshots.
 
 ## Step Guidance
 
@@ -226,13 +294,13 @@ Use only when a short highlight is not enough.
 3. Name every step with user intent, not implementation detail.
 4. Prefer clickthrough scenes over scroll-heavy storytelling.
 5. Use `wait` to show result states instead of inventing motion.
-6. Prefer stable selectors: `#id`, `[data-testid]`, `[aria-label]`, then semantic selectors.
+6. Prefer stable selectors (see Selector Discovery below).
 7. Scope selectors when there are repeated elements.
 8. Keep callout text compact.
 9. Blur anything sensitive.
 10. Record cleanly first; polish in the dashboard editor after upload.
 
-## How Codex Should Build Configs
+## How You Should Build Configs
 
 When generating configs:
 
@@ -242,7 +310,7 @@ When generating configs:
 - prefer adding a new tutorial entry rather than replacing the file wholesale
 - keep JSON formatting clean and minimal
 
-If the user gives a vague flow, Codex should inspect the page first.
+If the user gives a vague flow, inspect the page first.
 
 ## Selector Discovery
 
@@ -281,6 +349,24 @@ Use:
 - `record --dry-run` to validate config structure
 - `record` for final capture
 
+## Keeping Demos Fresh from CI
+
+To re-record and update a demo whenever the product changes, use the composite GitHub
+Action from `hauju/stepshots` with a repo secret and the existing demo's id:
+
+```yaml
+- uses: hauju/stepshots@main
+  with:
+    config: demo/stepshots.config.json
+    tutorials: landing-page
+    upload: "true"
+    token: ${{ secrets.STEPSHOTS_API_KEY }}
+    demo-id: ${{ vars.HERO_DEMO_ID }}
+```
+
+Because `demo-id` replaces the existing demo, every embed and share link stays valid
+while the screenshots update.
+
 ## Dashboard Export Guidance
 
 The dashboard can export a saved screenshot demo as `stepshots.config.json` for CLI recording.
@@ -297,7 +383,7 @@ Be explicit about one limitation:
 ```json
 {
   "baseUrl": "https://app.example.com",
-  "viewport": { "width": 1280, "height": 800 },
+  "format": "desktop",
   "defaultDelay": 500,
   "tutorials": {
     "signup-flow": {
@@ -380,7 +466,7 @@ Be explicit about one limitation:
 
 ### Structured JSON Output
 
-Use `--json` for machine-parseable output from any command:
+Use `--json` for machine-parseable output from `inspect` and `record`:
 
 ```bash
 stepshots inspect https://example.com --json    # Discover selectors
@@ -388,7 +474,7 @@ stepshots record --dry-run --json               # Validate config
 stepshots record -t tutorial-key --json         # Record with structured result
 ```
 
-In `--json` mode, the only stdout output is a single JSON object. Human-readable messages are suppressed. Progress bars and warnings go to stderr.
+In `--json` mode, the only stdout output is a single JSON object. Human-readable messages are suppressed. Progress bars and warnings go to stderr. `upload` prints human-readable output (including the demo URL); errors from any command are emitted as JSON when `--json` is set.
 
 ### Exit Codes
 
@@ -411,6 +497,9 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 6. Parse JSON result — if a step failed with a selector error:
    - Run `stepshots inspect <url> --json` to find the correct selector
    - Update the config and retry
+7. `stepshots upload output/<key>.stepshot` — publish (exit code 5 means auth: run
+   `stepshots whoami` to diagnose, then `stepshots login` or set `STEPSHOTS_TOKEN`)
+
 ### JSON Output Shapes
 
 **record** (success):
@@ -459,5 +548,6 @@ This skill should push AI agents toward:
 - explicit scenes over inferred navigation
 - clean config generation
 - CLI preview/record workflows
+- uploading and publishing, not stopping at a local `.stepshot` file
 - dashboard export when a saved demo already exists
 - using `--json` for programmatic feedback loops

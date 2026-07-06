@@ -1,4 +1,5 @@
 mod actions;
+mod auth;
 mod browser;
 mod bundler;
 mod commands;
@@ -37,6 +38,32 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Log in to Stepshots via your browser (stores an API token locally)
+    Login {
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+    },
+    /// Remove locally stored Stepshots credentials
+    Logout,
+    /// Show which account you're logged in as
+    Whoami {
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+
+        /// API token (defaults to the stored login token)
+        #[arg(long, env = "STEPSHOTS_TOKEN")]
+        token: Option<String>,
+    },
     /// Generate a sample stepshots.config.json
     Init {
         /// Overwrite existing config file
@@ -156,6 +183,15 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), CliError> {
     let json = cli.json;
     match cli.command {
+        Commands::Login { server } => {
+            auth::login(&server).await?;
+        }
+        Commands::Logout => {
+            auth::logout()?;
+        }
+        Commands::Whoami { server, token } => {
+            auth::whoami(&server, token).await?;
+        }
         Commands::Init { force } => {
             commands::init::run(force)?;
         }
@@ -188,9 +224,14 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             server,
             token,
         } => {
-            let token = token.ok_or_else(|| {
-                CliError::Auth("No API token provided. Set STEPSHOTS_TOKEN or use --token.".into())
-            })?;
+            let token = token
+                .or_else(|| auth::stored_token_for(&server))
+                .ok_or_else(|| {
+                    CliError::Auth(
+                        "No API token. Run `stepshots login`, or set STEPSHOTS_TOKEN / use --token."
+                            .into(),
+                    )
+                })?;
             commands::upload::run(
                 &files,
                 title.as_deref(),
