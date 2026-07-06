@@ -270,14 +270,20 @@ pub async fn record_tutorial(
             transition_frames: transition_frame_paths,
         });
 
-        let step_warnings: Vec<AnnotationWarning> =
-            drift[drift_start..].iter().map(AnnotationDrift::to_output).collect();
+        let step_warnings: Vec<AnnotationWarning> = drift[drift_start..]
+            .iter()
+            .map(AnnotationDrift::to_output)
+            .collect();
         step_results.push(StepOutput {
             index: i,
             name: step.name.clone(),
             action: step.action.clone(),
             selector: step.selector.clone(),
-            status: if step_warnings.is_empty() { "ok" } else { "drift" },
+            status: if step_warnings.is_empty() {
+                "ok"
+            } else {
+                "drift"
+            },
             error: None,
             annotation_warnings: if step_warnings.is_empty() {
                 None
@@ -523,7 +529,9 @@ async fn resolve_highlight(
             step_num,
             step_name: step_name(step),
             kind: "highlight",
-            selector: sel.map(|s| s.to_string()).unwrap_or_else(|| "(none)".to_string()),
+            selector: sel
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(none)".to_string()),
             reason,
         });
         return Ok(None);
@@ -798,8 +806,14 @@ mod tests {
     #[test]
     fn missing_element_is_orphaned() {
         // A selector that resolved to nothing (None) means the element is gone.
-        assert_eq!(classify_bounds(None, &viewport()), Some(DriftReason::Orphaned));
-        assert_eq!(classify_point(None, &viewport()), Some(DriftReason::Orphaned));
+        assert_eq!(
+            classify_bounds(None, &viewport()),
+            Some(DriftReason::Orphaned)
+        );
+        assert_eq!(
+            classify_point(None, &viewport()),
+            Some(DriftReason::Orphaned)
+        );
     }
 
     #[test]
@@ -818,7 +832,10 @@ mod tests {
             classify_bounds(Some(&b), &viewport()),
             Some(DriftReason::OffScreen)
         );
-        let p = Point2D { x: 100.0, y: 2000.0 };
+        let p = Point2D {
+            x: 100.0,
+            y: 2000.0,
+        };
         assert_eq!(
             classify_point(Some(&p), &viewport()),
             Some(DriftReason::OffScreen)
