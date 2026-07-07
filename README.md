@@ -47,6 +47,22 @@ stepshots record --tutorial my-tutorial
 stepshots preview my-tutorial
 ```
 
+### Authenticate
+
+Log in through your browser — this stores an API token locally at `~/.config/stepshots/tokens.json`:
+
+```sh
+stepshots login
+```
+
+Check which account you're logged in as:
+
+```sh
+stepshots whoami
+```
+
+For CI or scripts, set `STEPSHOTS_TOKEN` instead of logging in (generate one from [API keys](https://stepshots.com/docs/guides/api-keys)). Set `STEPSHOTS_SERVER` to point at a self-hosted instance.
+
 ### Upload to Stepshots
 
 ```sh
@@ -60,7 +76,15 @@ stepshots upload output/my-tutorial.stepshot --demo-id <DEMO_ID>
 stepshots upload output/my-tutorial.stepshot --server https://your-instance.com
 ```
 
-Set `STEPSHOTS_TOKEN` for authentication and `STEPSHOTS_SERVER` to override the default server URL. See [API keys](https://stepshots.com/docs/guides/api-keys) to generate a token.
+Uploads use your `stepshots login` session, or `STEPSHOTS_TOKEN` / `--token` when set. Override the server with `--server` or `STEPSHOTS_SERVER`.
+
+### Upgrade
+
+```sh
+stepshots upgrade
+```
+
+Upgrades in place using however you installed — a fresh prebuilt binary for `install.sh` installs, or `cargo install` for Cargo installs. Add `--check` to only check for a newer version.
 
 ## Configuration
 

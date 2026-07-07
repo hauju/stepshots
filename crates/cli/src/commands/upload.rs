@@ -73,15 +73,7 @@ pub async fn run(
                     view_url,
                 });
             } else {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                let message = serde_json::from_str::<serde_json::Value>(&body)
-                    .ok()
-                    .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
-                    .unwrap_or(body);
-                return Err(CliError::Upload(format!(
-                    "Replace failed ({status}): {message}"
-                )));
+                return Err(upload_error("Replace", resp).await);
             }
         } else {
             // Create new demo
@@ -138,20 +130,34 @@ pub async fn run(
                 println!("  View at: {view_url}");
                 results.push(UploadResult { demo_id, view_url });
             } else {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                let message = serde_json::from_str::<serde_json::Value>(&body)
-                    .ok()
-                    .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
-                    .unwrap_or(body);
-                return Err(CliError::Upload(format!(
-                    "Upload failed ({status}): {message}"
-                )));
+                return Err(upload_error("Upload", resp).await);
             }
         }
     }
 
     Ok(results)
+}
+
+/// Turn a non-success upload response into a helpful error. A 401 means the
+/// token is bad, so return an `Auth` error with a re-login hint instead of a
+/// bare status; everything else keeps the server's error message.
+async fn upload_error(action: &str, resp: reqwest::Response) -> CliError {
+    let status = resp.status();
+
+    if status.as_u16() == 401 {
+        return CliError::Auth(
+            "API token is invalid or expired. Run `stepshots login` again, \
+             or check --token / STEPSHOTS_TOKEN."
+                .into(),
+        );
+    }
+
+    let body = resp.text().await.unwrap_or_default();
+    let message = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+        .unwrap_or(body);
+    CliError::Upload(format!("{action} failed ({status}): {message}"))
 }
 
 /// Try to extract a title from the bundle's manifest.json.
