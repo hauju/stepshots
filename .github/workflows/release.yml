@@ -9,8 +9,32 @@ permissions:
   contents: write
 
 jobs:
+  check-versions:
+    name: Check version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify tag matches committed versions
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "(.+)"/\1/')"
+          EXT_VERSION="$(jq -r .version extension/manifest.json)"
+          echo "tag=$VERSION cargo=$CARGO_VERSION extension=$EXT_VERSION"
+          fail=0
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Cargo workspace version ($CARGO_VERSION) does not match tag ($VERSION)"
+            fail=1
+          fi
+          if [ "$VERSION" != "$EXT_VERSION" ]; then
+            echo "::error::extension/manifest.json version ($EXT_VERSION) does not match tag ($VERSION)"
+            fail=1
+          fi
+          exit $fail
+
   build-cli:
     name: Build CLI (${{ matrix.target }})
+    needs: check-versions
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -55,6 +79,7 @@ jobs:
 
   build-extension:
     name: Build Chrome extension
+    needs: check-versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
