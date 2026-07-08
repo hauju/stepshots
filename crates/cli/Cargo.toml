@@ -5,6 +5,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "CLI for recording, bundling, and uploading Stepshots demos"
 
 [[bin]]

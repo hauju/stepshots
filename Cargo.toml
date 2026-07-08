@@ -8,6 +8,8 @@ edition = "2024"
 authors = ["Hauke Jung <hauke.jung@outlook.de>"]
 license = "MIT"
 repository = "https://github.com/hauju/stepshots"
+homepage = "https://stepshots.com"
+documentation = "https://stepshots.com/docs"
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
