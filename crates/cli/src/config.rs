@@ -128,6 +128,34 @@ pub fn load_config(path: &Path) -> Result<StepshotsConfig, CliError> {
     Ok(config)
 }
 
+/// Resolve tutorial keys to `(key, tutorial)` pairs. An empty selection
+/// means all tutorials; an unknown key is a config error listing the
+/// available keys.
+pub fn select_tutorials<'a>(
+    config: &'a StepshotsConfig,
+    keys: &'a [String],
+) -> Result<Vec<(&'a String, &'a TutorialConfig)>, CliError> {
+    if keys.is_empty() {
+        return Ok(config.tutorials.iter().collect());
+    }
+    let mut selected = Vec::new();
+    for key in keys {
+        let tut = config.tutorials.get(key).ok_or_else(|| {
+            CliError::Config(format!(
+                "Tutorial '{key}' not found. Available: {}",
+                config
+                    .tutorials
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?;
+        selected.push((key, tut));
+    }
+    Ok(selected)
+}
+
 // ---------------------------------------------------------------------------
 // Config validation
 // ---------------------------------------------------------------------------

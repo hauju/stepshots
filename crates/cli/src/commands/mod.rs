@@ -9,3 +9,4 @@ pub mod schema;
 pub mod serve;
 pub mod upgrade;
 pub mod upload;
+pub mod verify;

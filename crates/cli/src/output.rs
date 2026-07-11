@@ -133,6 +133,84 @@ pub struct ListTutorial {
     pub steps: usize,
 }
 
+/// JSON output for `verify --json`.
+#[derive(Serialize)]
+pub struct VerifyOutput {
+    /// False when drift was found at or above the `--fail-on` level.
+    pub success: bool,
+    pub command: &'static str,
+    pub config: String,
+    pub summary: VerifySummary,
+    pub tutorials: Vec<VerifyTutorial>,
+}
+
+#[derive(Serialize)]
+pub struct VerifySummary {
+    pub tutorials: usize,
+    pub ok: usize,
+    pub warn: usize,
+    pub fail: usize,
+    pub steps_checked: usize,
+}
+
+#[derive(Serialize)]
+pub struct VerifyTutorial {
+    pub key: String,
+    pub title: String,
+    /// "ok", "warn" (annotation drift only), or "fail" (a step could not execute).
+    pub status: &'static str,
+    /// Set when the tutorial's start page failed to load; all steps are skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<VerifyFailure>,
+    pub steps: Vec<VerifyStep>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub annotation_warnings: Vec<VerifyAnnotationWarning>,
+}
+
+/// Per-step verification result.
+#[derive(Serialize)]
+pub struct VerifyStep {
+    pub index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    /// "ok", "fail", or "skipped" (an earlier step failed, page state unknown).
+    pub status: &'static str,
+    #[serde(flatten)]
+    pub failure: Option<VerifyFailure>,
+}
+
+/// Why and where a verification check failed, plus what to do about it.
+#[derive(Serialize)]
+pub struct VerifyFailure {
+    /// "orphaned" (selector matched nothing), "navigation_failed", or "action_failed".
+    pub reason: &'static str,
+    pub message: String,
+    /// URL the page was on when the check failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_url: Option<String>,
+    /// Screenshot of the page as it looked at failure time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<String>,
+    /// Suggested next command to diagnose or repair the drift.
+    pub hint: String,
+}
+
+/// An annotation whose anchor drifted during verification. Warn-level:
+/// the demo still records, but the annotation would be dropped.
+#[derive(Serialize)]
+pub struct VerifyAnnotationWarning {
+    /// 0-based index of the step the annotation belongs to (matches `steps[].index`).
+    pub step: usize,
+    /// Which annotation type drifted: highlight | blur | arrow | hotspot | popup | zoom.
+    pub kind: &'static str,
+    pub selector: String,
+    /// "orphaned" (element no longer exists) or "off_screen".
+    pub reason: &'static str,
+}
+
 /// JSON output for `doctor --json`.
 #[derive(Serialize)]
 pub struct DoctorOutput {

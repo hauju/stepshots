@@ -105,6 +105,28 @@ enum Commands {
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
     },
+    /// Verify demos still match the live app (replays steps, writes no bundle)
+    Verify {
+        /// Tutorials to verify (by key). Verifies all if omitted.
+        #[arg(value_name = "TUTORIAL")]
+        tutorials: Vec<String>,
+
+        /// Tutorial to verify (same as the positional argument)
+        #[arg(long, short, value_name = "TUTORIAL")]
+        tutorial: Vec<String>,
+
+        /// Directory for failure screenshots
+        #[arg(long, default_value = "output")]
+        save_failures: PathBuf,
+
+        /// Exit non-zero on: fail (broken steps) or warn (also annotation drift)
+        #[arg(long, value_enum, default_value = "fail")]
+        fail_on: commands::verify::FailOn,
+
+        /// Persistent browser profile directory (for authenticated flows)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
+    },
     /// Open a visible browser with a saved profile to log in to sites
     /// used by authenticated recordings
     Browser {
@@ -296,6 +318,31 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 &config,
                 &tutorial,
                 &effective_viewport,
+                profile_dir.as_deref(),
+            )
+            .await?;
+        }
+        Commands::Verify {
+            tutorials,
+            tutorial,
+            save_failures,
+            fail_on,
+            profile_dir,
+        } => {
+            let mut selected = tutorials;
+            selected.extend(tutorial);
+            let config_path = config::find_config(cli.config.as_deref())?;
+            let config = config::load_config(&config_path)?;
+            if !json {
+                println!("Using config: {}", config_path.display());
+            }
+            commands::verify::run(
+                &config,
+                &config_path,
+                &selected,
+                &save_failures,
+                fail_on,
+                json,
                 profile_dir.as_deref(),
             )
             .await?;

@@ -37,26 +37,7 @@ pub async fn run(
     json: bool,
     profile_dir: Option<&Path>,
 ) -> Result<(), CliError> {
-    let selected: Vec<(&String, &TutorialConfig)> = if tutorials.is_empty() {
-        config.tutorials.iter().collect()
-    } else {
-        let mut selected = Vec::new();
-        for key in tutorials {
-            let tut = config.tutorials.get(key).ok_or_else(|| {
-                CliError::Config(format!(
-                    "Tutorial '{key}' not found. Available: {}",
-                    config
-                        .tutorials
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ))
-            })?;
-            selected.push((key, tut));
-        }
-        selected
-    };
+    let selected = crate::config::select_tutorials(config, tutorials)?;
 
     let mut tutorial_outputs: Vec<TutorialOutput> = Vec::new();
     let mut failed = 0usize;
@@ -494,7 +475,7 @@ pub async fn record_tutorial(
 
 /// Best-effort screenshot of the page as it looked when a step failed,
 /// saved next to the would-be bundle as `<key>.failed-step-<n>.png`.
-async fn save_debug_screenshot(
+pub(crate) async fn save_debug_screenshot(
     browser: &Browser,
     output_path: &Path,
     step_num: usize,
@@ -511,7 +492,10 @@ async fn save_debug_screenshot(
     Some(path)
 }
 
-async fn wait_for_step_target(browser: &Browser, step: &StepConfig) -> Result<(), CliError> {
+pub(crate) async fn wait_for_step_target(
+    browser: &Browser,
+    step: &StepConfig,
+) -> Result<(), CliError> {
     let selector = match step.action.as_str() {
         "click"
             if step
@@ -546,11 +530,11 @@ async fn wait_for_step_target(browser: &Browser, step: &StepConfig) -> Result<()
     }
 }
 
-fn should_capture_before_action(step: &StepConfig) -> bool {
+pub(crate) fn should_capture_before_action(step: &StepConfig) -> bool {
     matches!(step.action.as_str(), "click" | "navigate")
 }
 
-async fn get_current_url(browser: &Browser) -> Option<String> {
+pub(crate) async fn get_current_url(browser: &Browser) -> Option<String> {
     browser
         .page()
         .evaluate("window.location.href")
@@ -559,7 +543,10 @@ async fn get_current_url(browser: &Browser) -> Option<String> {
         .and_then(|v| v.into_value::<String>().ok())
 }
 
-async fn restore_scene_scroll(browser: &Browser, step: &StepConfig) -> Result<(), CliError> {
+pub(crate) async fn restore_scene_scroll(
+    browser: &Browser,
+    step: &StepConfig,
+) -> Result<(), CliError> {
     let x = step.scene_scroll_x.unwrap_or(0.0);
     let y = step.scene_scroll_y.unwrap_or(0.0);
     browser.set_scroll_position(x, y).await?;
@@ -584,7 +571,7 @@ fn is_point_visible(x: f64, y: f64, viewport: &Viewport) -> bool {
 
 /// Why an annotation could not be anchored onto a recorded step.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum DriftReason {
+pub(crate) enum DriftReason {
     /// The selector matched nothing — the element no longer exists on the page.
     Orphaned,
     /// The element was found but resolved outside the captured viewport.
@@ -592,14 +579,14 @@ enum DriftReason {
 }
 
 impl DriftReason {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             DriftReason::Orphaned => "orphaned",
             DriftReason::OffScreen => "off_screen",
         }
     }
 
-    fn describe(self) -> &'static str {
+    pub(crate) fn describe(self) -> &'static str {
         match self {
             DriftReason::Orphaned => "no longer exists (element not found)",
             DriftReason::OffScreen => "resolved off-screen",
@@ -608,12 +595,13 @@ impl DriftReason {
 }
 
 /// A single annotation whose anchor drifted during recording.
-struct AnnotationDrift {
-    step_num: usize,
-    step_name: String,
-    kind: &'static str,
-    selector: String,
-    reason: DriftReason,
+pub(crate) struct AnnotationDrift {
+    /// 1-based index of the step the annotation belongs to.
+    pub(crate) step_num: usize,
+    pub(crate) step_name: String,
+    pub(crate) kind: &'static str,
+    pub(crate) selector: String,
+    pub(crate) reason: DriftReason,
 }
 
 impl AnnotationDrift {
@@ -651,7 +639,7 @@ fn step_name(step: &StepConfig) -> String {
 
 /// All overlays resolved for a single step's scene.
 #[derive(Default)]
-struct ResolvedOverlays {
+pub(crate) struct ResolvedOverlays {
     highlight: Option<HighlightEntry>,
     blurs: Vec<ElementBounds>,
     arrows: Vec<ArrowPointer>,
@@ -661,7 +649,7 @@ struct ResolvedOverlays {
 }
 
 /// Resolve every annotation kind for a step, recording any drift into `drift`.
-async fn resolve_overlays(
+pub(crate) async fn resolve_overlays(
     browser: &Browser,
     step: &StepConfig,
     viewport: &Viewport,
@@ -949,7 +937,7 @@ async fn resolve_zoom_regions(
     Ok(results)
 }
 
-fn resolve_url(base: &str, path: &str) -> String {
+pub(crate) fn resolve_url(base: &str, path: &str) -> String {
     if path.starts_with("http://") || path.starts_with("https://") {
         path.to_string()
     } else {
