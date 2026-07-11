@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod init;
 pub mod inspect;
 pub mod preview;

@@ -146,7 +146,13 @@ const SCAN_JS: &str = r#"
 })()
 "#;
 
-pub async fn run(url: &str, width: u32, height: u32, json: bool) -> Result<(), CliError> {
+pub async fn run(
+    url: &str,
+    width: u32,
+    height: u32,
+    json: bool,
+    profile_dir: Option<&std::path::Path>,
+) -> Result<(), CliError> {
     let viewport = Viewport {
         width,
         height,
@@ -156,7 +162,7 @@ pub async fn run(url: &str, width: u32, height: u32, json: bool) -> Result<(), C
     if !json {
         println!("Launching browser...");
     }
-    let browser = Browser::launch(&viewport, json).await?;
+    let browser = Browser::launch(&viewport, json, profile_dir).await?;
 
     if !json {
         println!("Navigating to {url}");

@@ -10,6 +10,7 @@ pub async fn run(
     config: &StepshotsConfig,
     tutorial_key: &str,
     viewport: &Viewport,
+    profile_dir: Option<&std::path::Path>,
 ) -> Result<(), CliError> {
     let tutorial = config.tutorials.get(tutorial_key).ok_or_else(|| {
         CliError::Config(format!(
@@ -26,7 +27,7 @@ pub async fn run(
     println!("Preview: {} ({})", tutorial.title, tutorial_key);
     println!("Browser will stay open — press Ctrl+C to close.");
 
-    let browser = Browser::launch(viewport, false).await?;
+    let browser = Browser::launch(viewport, false, profile_dir).await?;
 
     let start_url = resolve_url(&config.base_url, &tutorial.url);
     browser.navigate(&start_url).await?;

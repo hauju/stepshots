@@ -83,11 +83,30 @@ enum Commands {
         /// Show what would be recorded without launching a browser
         #[arg(long)]
         dry_run: bool,
+
+        /// Persistent browser profile directory (for authenticated recordings)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
     },
     /// Preview a tutorial in a visible browser
     Preview {
         /// Tutorial key to preview
         tutorial: String,
+
+        /// Persistent browser profile directory (for authenticated recordings)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
+    },
+    /// Open a visible browser with a saved profile to log in to sites
+    /// used by authenticated recordings
+    Browser {
+        /// URL to open
+        #[arg(default_value = "about:blank")]
+        url: String,
+
+        /// Persistent browser profile directory to create or reuse
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: PathBuf,
     },
     /// Upload .stepshot bundles to the Stepshots API
     Upload {
@@ -124,6 +143,10 @@ enum Commands {
         /// Viewport height
         #[arg(long, default_value = "800")]
         height: u32,
+
+        /// Persistent browser profile directory (for authenticated pages)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
     },
     /// Upgrade stepshots to the latest version
     Upgrade {
@@ -199,15 +222,27 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             tutorial,
             output,
             dry_run,
+            profile_dir,
         } => {
             let config_path = config::find_config(cli.config.as_deref())?;
             let config = config::load_config(&config_path)?;
             if !json {
                 println!("Using config: {}", config_path.display());
             }
-            commands::record::run(&config, &tutorial, &output, dry_run, json).await?;
+            commands::record::run(
+                &config,
+                &tutorial,
+                &output,
+                dry_run,
+                json,
+                profile_dir.as_deref(),
+            )
+            .await?;
         }
-        Commands::Preview { tutorial } => {
+        Commands::Preview {
+            tutorial,
+            profile_dir,
+        } => {
             let config_path = config::find_config(cli.config.as_deref())?;
             let config = config::load_config(&config_path)?;
             if !json {
@@ -215,7 +250,16 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             }
             let effective_viewport =
                 manifest::resolve_viewport(config.format.as_ref(), &config.viewport);
-            commands::preview::run(&config, &tutorial, &effective_viewport).await?;
+            commands::preview::run(
+                &config,
+                &tutorial,
+                &effective_viewport,
+                profile_dir.as_deref(),
+            )
+            .await?;
+        }
+        Commands::Browser { url, profile_dir } => {
+            commands::browser::run(&url, &profile_dir).await?;
         }
         Commands::Upload {
             files,
@@ -241,7 +285,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             )
             .await?;
         }
-        Commands::Inspect { url, width, height } => {
+        Commands::Inspect {
+            url,
+            width,
+            height,
+            profile_dir,
+        } => {
             let url = match url {
                 Some(u) => u,
                 None => {
@@ -253,7 +302,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     config.base_url.clone()
                 }
             };
-            commands::inspect::run(&url, width, height, json).await?;
+            commands::inspect::run(&url, width, height, json, profile_dir.as_deref()).await?;
         }
         Commands::Upgrade { force, check } => {
             commands::upgrade::run(force, check).await?;

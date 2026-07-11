@@ -17,7 +17,15 @@ pub struct Browser {
 
 impl Browser {
     /// Launch a Chrome/Chromium instance via CDP.
-    pub async fn launch(viewport: &Viewport, headless: bool) -> Result<Self, CliError> {
+    ///
+    /// `profile_dir` points Chrome at a persistent user-data directory so
+    /// logged-in sessions (cookies, local storage) survive across runs —
+    /// required for recording authenticated flows.
+    pub async fn launch(
+        viewport: &Viewport,
+        headless: bool,
+        profile_dir: Option<&std::path::Path>,
+    ) -> Result<Self, CliError> {
         let device_scale_factor = viewport.device_scale_factor.unwrap_or(1.0);
         let mut builder = BrowserConfig::builder()
             .window_size(viewport.width, viewport.height)
@@ -32,6 +40,10 @@ impl Browser {
 
         if headless {
             builder = builder.arg("--headless=new");
+        }
+
+        if let Some(dir) = profile_dir {
+            builder = builder.user_data_dir(dir);
         }
 
         if let Ok(chrome_path) = std::env::var("CHROME_PATH") {

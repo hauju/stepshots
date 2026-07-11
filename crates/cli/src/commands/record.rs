@@ -20,6 +20,7 @@ pub async fn run(
     output_dir: &Path,
     dry_run: bool,
     json: bool,
+    profile_dir: Option<&Path>,
 ) -> Result<(), CliError> {
     let selected: Vec<(&String, &TutorialConfig)> = if tutorials.is_empty() {
         config.tutorials.iter().collect()
@@ -70,8 +71,15 @@ pub async fn run(
 
         let output_path = output_dir.join(format!("{key}.stepshot"));
         let effective_viewport = resolve_viewport(config.format.as_ref(), &config.viewport);
-        let step_results =
-            record_tutorial(config, tutorial, &effective_viewport, &output_path, json).await?;
+        let step_results = record_tutorial(
+            config,
+            tutorial,
+            &effective_viewport,
+            &output_path,
+            json,
+            profile_dir,
+        )
+        .await?;
 
         if !json {
             println!(
@@ -115,8 +123,9 @@ pub async fn record_tutorial(
     viewport: &Viewport,
     output_path: &Path,
     json: bool,
+    profile_dir: Option<&Path>,
 ) -> Result<Vec<StepOutput>, CliError> {
-    let browser = Browser::launch(viewport, true).await?;
+    let browser = Browser::launch(viewport, true, profile_dir).await?;
 
     // Apply color scheme if configured
     if let Some(ref theme) = config.theme {

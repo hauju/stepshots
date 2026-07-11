@@ -47,6 +47,20 @@ stepshots record --tutorial my-tutorial
 stepshots preview my-tutorial
 ```
 
+### Record logged-in flows
+
+Recordings run in a fresh headless browser, so sites you're normally signed in to appear logged out. To record an authenticated flow, log in once inside a persistent browser profile, then point recordings at it:
+
+```sh
+# One-time: opens a visible browser — log in, then press Ctrl+C
+stepshots browser https://github.com/login --profile-dir ~/.stepshots/profile
+
+# Recordings (and preview/inspect) reuse the saved session
+stepshots record --tutorial my-tutorial --profile-dir ~/.stepshots/profile
+```
+
+Set `STEPSHOTS_PROFILE_DIR` to avoid repeating the flag. Use a dedicated profile directory — never your regular Chrome profile.
+
 ### Authenticate
 
 Log in through your browser — this stores an API token locally at `~/.config/stepshots/tokens.json`:

@@ -145,6 +145,7 @@ async fn handle_record(
         &req.config.viewport,
         &output_path,
         false,
+        None,
     )
     .await
     {
