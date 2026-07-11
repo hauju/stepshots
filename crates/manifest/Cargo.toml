@@ -10,3 +10,7 @@ description = "Shared manifest types for Stepshots demo bundles"
 
 [dependencies]
 serde = { workspace = true }
+schemars = { version = "1", optional = true }
+
+[features]
+schema = ["dep:schemars"]

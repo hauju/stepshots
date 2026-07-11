@@ -28,6 +28,11 @@ pub enum CliError {
 
     #[error("{0}")]
     Other(String),
+
+    /// Failure the command already reported with full context (text or JSON).
+    /// `main` must exit with `code` without printing anything further.
+    #[error("failure already reported")]
+    Reported { code: i32 },
 }
 
 impl From<chromiumoxide::error::CdpError> for CliError {
@@ -62,6 +67,7 @@ impl CliError {
             CliError::Action(_) => 3,
             CliError::Bundle(_) => 4,
             CliError::Upload(_) | CliError::Auth(_) => 5,
+            CliError::Reported { code } => *code,
         }
     }
 
@@ -76,6 +82,7 @@ impl CliError {
             CliError::Io(_) => "io",
             CliError::Upgrade(_) => "upgrade",
             CliError::Other(_) => "other",
+            CliError::Reported { .. } => "reported",
         }
     }
 }

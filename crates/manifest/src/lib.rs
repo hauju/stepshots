@@ -6,61 +6,139 @@ use serde::{Deserialize, Serialize};
 // Recording config types (stepshots.config.json — shared across CLI, extension, etc.)
 // ============================================================================
 
+/// Canonical URL of the published JSON Schema for `stepshots.config.json`.
+/// Written as the `$schema` key by `stepshots init` and config exports so
+/// editors provide autocomplete and validation.
+pub const CONFIG_SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/hauju/stepshots/main/schema/stepshots.config.schema.json";
+
+/// Step actions accepted in `stepshots.config.json`.
+pub const VALID_ACTIONS: &[&str] = &[
+    "click",
+    "type",
+    "key",
+    "scroll",
+    "scroll-to",
+    "hover",
+    "navigate",
+    "wait",
+    "select",
+];
+
+/// Callout placements accepted for highlights and hotspots.
+pub const VALID_POSITIONS: &[&str] = &["top", "bottom", "left", "right"];
+
+#[cfg(feature = "schema")]
+fn action_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "enum": VALID_ACTIONS,
+        "description": "What this step does: click, type, key, scroll, scroll-to, hover, navigate, wait, or select."
+    })
+}
+
+#[cfg(feature = "schema")]
+fn position_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "enum": VALID_POSITIONS,
+        "description": "Where the callout is placed relative to the element: top, bottom, left, or right."
+    })
+}
+
+#[cfg(feature = "schema")]
+fn theme_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "enum": ["light", "dark"],
+        "description": "Color scheme forced during recording. Defaults to the browser default."
+    })
+}
+
 /// Top-level config from `stepshots.config.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct StepshotsConfig {
+    /// JSON Schema reference for editor autocomplete and validation.
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    /// Base URL prepended to every relative tutorial and step URL, e.g. "https://app.example.com".
     pub base_url: String,
+    /// Browser viewport in CSS pixels. Ignored when `format` names a preset.
     #[serde(default = "default_viewport")]
     pub viewport: Viewport,
+    /// Named viewport preset (e.g. "desktop", "mobile"). Overrides `viewport` unless "custom".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<DemoFormat>,
+    /// Milliseconds to wait after each action before capturing, unless a step sets its own `delay`.
     #[serde(default = "default_delay")]
     pub default_delay: u64,
     /// Color scheme for recording: "dark" or "light". Defaults to browser default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(schema_with = "theme_schema"))]
     pub theme: Option<String>,
+    /// Tutorials to record, keyed by a short slug that becomes the output file name.
     pub tutorials: HashMap<String, TutorialConfig>,
 }
 
 /// A single tutorial within the config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TutorialConfig {
+    /// Start page for the tutorial — absolute, or relative to the config `baseUrl`.
     pub url: String,
+    /// Human-readable title, shown in the dashboard and used as the demo title on upload.
     pub title: String,
+    /// Optional longer description of what the tutorial shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Ordered actions to perform; each step becomes one screenshot in the demo.
     pub steps: Vec<StepConfig>,
 }
 
 /// A single step action in a tutorial.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct StepConfig {
+    #[cfg_attr(feature = "schema", schemars(schema_with = "action_schema"))]
     pub action: String,
+    /// Optional label for the step, shown in progress output and the dashboard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// CSS selector of the element this action targets. Required for click, type, hover, and select.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector: Option<String>,
+    /// How the selector was derived (informational, set by recording tools).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector_quality: Option<String>,
+    /// Text to enter. Required for the "type" action. Supports `${ENV_VAR}` interpolation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Target URL for the "navigate" action — absolute, or relative to `baseUrl`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Key to press for the "key" action, e.g. "Enter" or "Escape".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// Option value to choose for the "select" action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Milliseconds to wait after this action, overriding the config `defaultDelay`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay: Option<u64>,
+    /// Horizontal scroll distance in pixels for the "scroll" action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_x: Option<f64>,
+    /// Vertical scroll distance in pixels for the "scroll" action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_y: Option<f64>,
+    /// Horizontal scroll position the page is restored to before this step's capture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene_scroll_x: Option<f64>,
+    /// Vertical scroll position the page is restored to before this step's capture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene_scroll_y: Option<f64>,
     /// Optional CSS selector used only for resolving highlight bounds.
@@ -69,90 +147,125 @@ pub struct StepConfig {
     /// highlighting another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight_selector: Option<String>,
+    /// Highlight annotations drawn on this step's screenshot.
     #[serde(alias = "annotations")]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub highlights: Vec<HighlightConfig>,
+    /// Regions blurred on this step's screenshot (e.g. to hide sensitive data).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blur_regions: Vec<BlurConfig>,
+    /// Arrows drawn between two elements on this step's screenshot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub arrows: Vec<ArrowConfig>,
+    /// Pulsing hotspot markers placed on elements.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotConfig>,
+    /// Popup cards anchored to elements.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub popups: Vec<PopupConfig>,
+    /// Regions the viewer zooms into on this step.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_regions: Vec<ZoomConfig>,
 }
 
 /// Highlight config for a step in the recording config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HighlightConfig {
+    /// Explicit pixel bounds. When set, wins over selector resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<ElementBounds>,
+    /// Draw a border around the highlighted element (defaults to true).
     #[serde(alias = "highlight")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_border: Option<bool>,
+    /// Text shown in a callout next to the highlight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callout: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(schema_with = "position_schema"))]
     pub position: Option<String>,
+    /// Highlight color as a CSS color value, e.g. "#7c3aed".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Draw an arrow from the callout to the element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrow: Option<bool>,
 }
 
 /// Blur region config — resolved from CSS selector to element bounds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct BlurConfig {
+    /// CSS selector of the element to blur.
     pub selector: String,
 }
 
 /// Arrow config — resolved from two CSS selectors to element center points.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ArrowConfig {
+    /// CSS selector of the element the arrow starts from.
     pub from_selector: String,
+    /// CSS selector of the element the arrow points to.
     pub to_selector: String,
+    /// Arrow color as a CSS color value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Stroke width in pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroke_width: Option<f64>,
+    /// Curve amount from -1.0 (bend left) to 1.0 (bend right); 0 is straight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub curvature: Option<f64>,
 }
 
 /// Hotspot config — resolved from CSS selector to element center point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HotspotConfig {
+    /// CSS selector of the element the hotspot is centered on.
     pub selector: String,
+    /// Text shown in a callout next to the hotspot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callout: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(schema_with = "position_schema"))]
     pub position: Option<String>,
+    /// Hotspot color as a CSS color value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Hotspot diameter in pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
+    /// Whether clicking the hotspot advances the demo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_click_target: Option<bool>,
 }
 
 /// Popup config — resolved from CSS selector to element center point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PopupConfig {
+    /// CSS selector of the element the popup is anchored to.
     pub selector: String,
+    /// Popup heading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Popup body text.
     pub body: String,
+    /// Popup width in pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f64>,
+    /// Background color as a CSS color value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Text color as a CSS color value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_color: Option<String>,
     /// Rendering style: "card" (default) or "button".
@@ -177,19 +290,25 @@ pub struct PopupConfig {
 
 /// Zoom region config — resolved from CSS selector to element bounds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ZoomConfig {
+    /// CSS selector of the element to zoom into.
     pub selector: String,
+    /// Zoom factor, e.g. 2.0 for 2x.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub magnification: Option<f64>,
+    /// Zoom animation start delay in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay: Option<u32>,
+    /// Zoom animation duration in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<u32>,
 }
 
 /// Preset format for demo recording viewport dimensions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum DemoFormat {
     DesktopHd,
@@ -361,6 +480,7 @@ pub struct CalloutOffset {
 /// field on another overlay (e.g. `HighlightEntry.bounds`, `ZoomRegion.bounds`), the
 /// overlay's own `z_index` governs paint order and this field stays `None`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ElementBounds {
     pub x: f64,
     pub y: f64,
@@ -494,10 +614,14 @@ pub struct ZoomRegion {
 
 /// Viewport dimensions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Viewport {
+    /// Width in CSS pixels.
     pub width: u32,
+    /// Height in CSS pixels.
     pub height: u32,
+    /// Device pixel ratio, e.g. 2.0 for retina-quality screenshots.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_scale_factor: Option<f64>,
 }

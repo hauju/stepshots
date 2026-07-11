@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 #[allow(unused_imports)]
 pub use manifest::{
     ArrowConfig, BlurConfig, DemoFormat, HighlightConfig, HotspotConfig, PopupConfig, StepConfig,
-    StepshotsConfig, TutorialConfig, ZoomConfig, default_delay, default_viewport,
+    StepshotsConfig, TutorialConfig, VALID_ACTIONS, VALID_POSITIONS, ZoomConfig, default_delay,
+    default_viewport,
 };
 
 use crate::error::CliError;
@@ -130,20 +131,6 @@ pub fn load_config(path: &Path) -> Result<StepshotsConfig, CliError> {
 // ---------------------------------------------------------------------------
 // Config validation
 // ---------------------------------------------------------------------------
-
-const VALID_ACTIONS: &[&str] = &[
-    "click",
-    "type",
-    "key",
-    "scroll",
-    "scroll-to",
-    "hover",
-    "navigate",
-    "wait",
-    "select",
-];
-
-const VALID_POSITIONS: &[&str] = &["top", "bottom", "left", "right"];
 
 struct ConfigError {
     path: String,
@@ -335,6 +322,7 @@ fn validate_step(path: &str, step: &StepConfig) -> Vec<ConfigError> {
 /// Generate a sample config.
 pub fn sample_config() -> String {
     serde_json::to_string_pretty(&StepshotsConfig {
+        schema: Some(manifest::CONFIG_SCHEMA_URL.into()),
         base_url: "https://example.com".into(),
         viewport: default_viewport(),
         format: Some(DemoFormat::Desktop),

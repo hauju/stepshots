@@ -32,7 +32,7 @@ Requires Chrome or Chromium installed on your system.
 stepshots init
 ```
 
-Creates a `stepshots.config.json` with a sample tutorial definition.
+Creates a `stepshots.config.json` with a sample tutorial definition. The file carries a `$schema` reference, so editors with JSON Schema support (VS Code, JetBrains, Zed, …) autocomplete and validate it as you type. Print the schema itself with `stepshots schema`.
 
 ### Record tutorials
 
@@ -46,6 +46,8 @@ stepshots record --tutorial my-tutorial
 # Preview in a visible browser
 stepshots preview my-tutorial
 ```
+
+If a step fails (usually a selector that no longer matches), the CLI saves a screenshot of the page at failure time (`output/<key>.failed-step-<n>.png`), prints the page URL, and continues with the remaining tutorials. Use `stepshots inspect <url>` to find the right selector and `stepshots preview <key>` to watch the flow live.
 
 ### Record logged-in flows
 

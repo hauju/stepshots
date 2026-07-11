@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use manifest::{
@@ -11,7 +11,22 @@ use crate::browser::Browser;
 use crate::bundler::create_bundle;
 use crate::config::{StepshotsConfig, TutorialConfig};
 use crate::error::CliError;
-use crate::output::{AnnotationWarning, RecordOutput, StepOutput, TutorialOutput};
+use crate::output::{AnnotationWarning, ErrorOutput, RecordOutput, StepOutput, TutorialOutput};
+
+/// Details of the step that aborted a tutorial recording.
+pub struct StepFailure {
+    /// 0-based index of the failed step.
+    pub step_index: usize,
+    pub action: String,
+    pub selector: Option<String>,
+    pub message: String,
+    pub category: &'static str,
+    pub exit_code: i32,
+    /// URL the page was on when the step failed.
+    pub page_url: Option<String>,
+    /// Screenshot of the page as it looked at failure time, if one could be saved.
+    pub debug_screenshot: Option<PathBuf>,
+}
 
 /// Record one or more tutorials into `.stepshot` bundles.
 pub async fn run(
@@ -44,6 +59,9 @@ pub async fn run(
     };
 
     let mut tutorial_outputs: Vec<TutorialOutput> = Vec::new();
+    let mut failed = 0usize;
+    let mut first_error: Option<ErrorOutput> = None;
+    let mut exit_code = 1;
 
     for (key, tutorial) in &selected {
         if !json {
@@ -71,7 +89,7 @@ pub async fn run(
 
         let output_path = output_dir.join(format!("{key}.stepshot"));
         let effective_viewport = resolve_viewport(config.format.as_ref(), &config.viewport);
-        let step_results = record_tutorial(
+        match record_tutorial(
             config,
             tutorial,
             &effective_viewport,
@@ -79,44 +97,143 @@ pub async fn run(
             json,
             profile_dir,
         )
-        .await?;
+        .await
+        {
+            Ok((step_results, None)) => {
+                if !json {
+                    println!(
+                        "  Created: {} ({} steps)",
+                        output_path.display(),
+                        tutorial.steps.len()
+                    );
+                }
 
-        if !json {
-            println!(
-                "  Created: {} ({} steps)",
-                output_path.display(),
-                tutorial.steps.len()
-            );
+                tutorial_outputs.push(TutorialOutput {
+                    key: key.to_string(),
+                    title: tutorial.title.clone(),
+                    output: Some(output_path.display().to_string()),
+                    steps_total: tutorial.steps.len(),
+                    steps_completed: Some(step_results.len()),
+                    steps: Some(step_results),
+                });
+            }
+            Ok((step_results, Some(failure))) => {
+                if !json {
+                    print_step_failure(key, tutorial, &failure);
+                }
+                failed += 1;
+                if first_error.is_none() {
+                    exit_code = failure.exit_code;
+                    first_error = Some(ErrorOutput {
+                        category: failure.category.to_string(),
+                        message: failure.message.clone(),
+                        step_index: Some(failure.step_index),
+                        tutorial: Some(key.to_string()),
+                    });
+                }
+                let completed = step_results.iter().filter(|s| s.status != "failed").count();
+                tutorial_outputs.push(TutorialOutput {
+                    key: key.to_string(),
+                    title: tutorial.title.clone(),
+                    output: None,
+                    steps_total: tutorial.steps.len(),
+                    steps_completed: Some(completed),
+                    steps: Some(step_results),
+                });
+            }
+            Err(e) => {
+                // Setup failed (browser launch or initial navigation) — no steps ran.
+                if !json {
+                    eprintln!("  ✗ {e}");
+                }
+                failed += 1;
+                if first_error.is_none() {
+                    exit_code = e.exit_code();
+                    first_error = Some(ErrorOutput {
+                        category: e.error_category().to_string(),
+                        message: e.to_string(),
+                        step_index: None,
+                        tutorial: Some(key.to_string()),
+                    });
+                }
+                tutorial_outputs.push(TutorialOutput {
+                    key: key.to_string(),
+                    title: tutorial.title.clone(),
+                    output: None,
+                    steps_total: tutorial.steps.len(),
+                    steps_completed: Some(0),
+                    steps: None,
+                });
+            }
         }
-
-        tutorial_outputs.push(TutorialOutput {
-            key: key.to_string(),
-            title: tutorial.title.clone(),
-            output: Some(output_path.display().to_string()),
-            steps_total: tutorial.steps.len(),
-            steps_completed: Some(step_results.len()),
-            steps: Some(step_results),
-        });
     }
 
     if json {
         let out = RecordOutput {
-            success: true,
+            success: failed == 0,
             command: "record",
             dry_run: if dry_run { Some(true) } else { None },
             tutorials: Some(tutorial_outputs),
-            error: None,
+            error: first_error,
         };
         println!(
             "{}",
             serde_json::to_string_pretty(&out).expect("serializing RecordOutput")
         );
+    } else if failed > 0 {
+        eprintln!("\n{failed} of {} tutorial(s) failed.", selected.len());
+    } else if !dry_run {
+        let files: Vec<String> = tutorial_outputs
+            .iter()
+            .filter_map(|t| t.output.clone())
+            .collect();
+        if !files.is_empty() {
+            println!("\nNext: upload to your dashboard with");
+            println!("  stepshots upload {}", files.join(" "));
+        }
     }
 
+    if failed > 0 {
+        return Err(CliError::Reported { code: exit_code });
+    }
     Ok(())
 }
 
+/// Print a failed step with everything needed to debug it: which step broke,
+/// what page the browser was on, and the commands that help fix it.
+fn print_step_failure(key: &str, tutorial: &TutorialConfig, failure: &StepFailure) {
+    let target = failure
+        .selector
+        .as_deref()
+        .map(|s| format!(" '{s}'"))
+        .unwrap_or_default();
+    eprintln!(
+        "  ✗ Step {}/{} ({}{}) failed: {}",
+        failure.step_index + 1,
+        tutorial.steps.len(),
+        failure.action,
+        target,
+        failure.message
+    );
+    if let Some(url) = &failure.page_url {
+        eprintln!("    Page at failure: {url}");
+    }
+    if let Some(path) = &failure.debug_screenshot {
+        eprintln!("    Debug screenshot: {}", path.display());
+    }
+    eprintln!("    To debug: stepshots preview {key}   # watch the flow in a visible browser");
+    if let Some(url) = &failure.page_url {
+        eprintln!(
+            "              stepshots inspect {url}   # list that page's elements and selectors"
+        );
+    }
+}
+
 /// Record a single tutorial.
+///
+/// Setup problems (browser launch, initial navigation) return `Err`. A step
+/// that fails mid-recording instead returns `Ok` with a [`StepFailure`]
+/// describing it, plus the results of the steps that ran; no bundle is written.
 pub async fn record_tutorial(
     config: &StepshotsConfig,
     tutorial: &TutorialConfig,
@@ -124,7 +241,7 @@ pub async fn record_tutorial(
     output_path: &Path,
     json: bool,
     profile_dir: Option<&Path>,
-) -> Result<Vec<StepOutput>, CliError> {
+) -> Result<(Vec<StepOutput>, Option<StepFailure>), CliError> {
     let browser = Browser::launch(viewport, true, profile_dir).await?;
 
     // Apply color scheme if configured
@@ -161,6 +278,7 @@ pub async fn record_tutorial(
         std::collections::HashMap::new();
 
     // Execute each config step and capture the screenshot for that step's scene.
+    let mut failure: Option<StepFailure> = None;
     for (i, step) in tutorial.steps.iter().enumerate() {
         pb.set_message(format!(
             "{}: {}",
@@ -170,114 +288,146 @@ pub async fn record_tutorial(
 
         let drift_start = drift.len();
 
-        wait_for_step_target(&browser, step).await?;
-        let capture_before_action = should_capture_before_action(step);
-        restore_scene_scroll(&browser, step).await?;
+        let step_result: Result<(), CliError> = async {
+            wait_for_step_target(&browser, step).await?;
+            let capture_before_action = should_capture_before_action(step);
+            restore_scene_scroll(&browser, step).await?;
 
-        // For click/navigate we capture the scene (and resolve overlays) BEFORE the
-        // action fires; for everything else we capture AFTER it settles.
-        let mut scene_url = None;
-        let mut overlays = ResolvedOverlays::default();
-        if capture_before_action {
-            scene_url = get_current_url(&browser).await;
-            overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
-            let png = browser.screenshot().await?;
-            screenshots.push(png);
+            // For click/navigate we capture the scene (and resolve overlays) BEFORE the
+            // action fires; for everything else we capture AFTER it settles.
+            let mut scene_url = None;
+            let mut overlays = ResolvedOverlays::default();
+            if capture_before_action {
+                scene_url = get_current_url(&browser).await;
+                overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
+                let png = browser.screenshot().await?;
+                screenshots.push(png);
+            }
+
+            // Execute the action (may capture transition frames for scroll steps)
+            let action_result = execute_action(&browser, step, &config.base_url).await?;
+
+            // For scroll actions, the smooth scroll + frame capture replaces the idle wait.
+            // For other actions, wait for things to settle.
+            if action_result.transition_frames.is_empty() {
+                let delay = step.delay.unwrap_or(config.default_delay);
+                browser.wait_idle(delay).await;
+            }
+
+            if !capture_before_action {
+                scene_url = get_current_url(&browser).await;
+                overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
+                let png = browser.screenshot().await?;
+                screenshots.push(png);
+            }
+
+            let ResolvedOverlays {
+                highlight: step_highlight,
+                blurs: step_blurs,
+                arrows: step_arrows,
+                hotspots: step_hotspots,
+                popups: step_popups,
+                zooms: step_zooms,
+            } = overlays;
+
+            // Build transition frame paths and store the frame data
+            let step_idx = i;
+            let transition_frame_paths: Option<Vec<String>> =
+                if !action_result.transition_frames.is_empty() {
+                    let paths: Vec<String> = (0..action_result.transition_frames.len())
+                        .map(|f| format!("transitions/{step_idx}/{f}.webp"))
+                        .collect();
+                    all_transition_frames.insert(step_idx, action_result.transition_frames);
+                    Some(paths)
+                } else {
+                    None
+                };
+
+            manifest_steps.push(BundleManifestStep {
+                file: format!("steps/{step_idx}.webp"),
+                name: step.name.clone(),
+                action: Some(step.action.clone()),
+                url: scene_url.clone(),
+                current_path: scene_url
+                    .as_deref()
+                    .and_then(|url| url.strip_prefix(config.base_url.trim_end_matches('/')))
+                    .map(|path| {
+                        if path.is_empty() {
+                            "/".to_string()
+                        } else {
+                            path.to_string()
+                        }
+                    }),
+                target_url: step.url.clone(),
+                selector: step.selector.clone(),
+                selector_quality: step.selector_quality.clone(),
+                highlights: step_highlight.map(|a| vec![a]),
+                blur_regions: if step_blurs.is_empty() {
+                    None
+                } else {
+                    Some(step_blurs)
+                },
+                arrows: if step_arrows.is_empty() {
+                    None
+                } else {
+                    Some(step_arrows)
+                },
+                hotspots: if step_hotspots.is_empty() {
+                    None
+                } else {
+                    Some(step_hotspots)
+                },
+                popups: if step_popups.is_empty() {
+                    None
+                } else {
+                    Some(step_popups)
+                },
+                zoom_regions: if step_zooms.is_empty() {
+                    None
+                } else {
+                    Some(step_zooms)
+                },
+                text: step.text.clone(),
+                key: step.key.clone(),
+                scroll_x: step.scroll_x,
+                scroll_y: step.scroll_y,
+                scene_scroll_x: step.scene_scroll_x,
+                scene_scroll_y: step.scene_scroll_y,
+                value: step.value.clone(),
+                delay: step.delay,
+                transition_frames: transition_frame_paths,
+            });
+
+            Ok(())
         }
+        .await;
 
-        // Execute the action (may capture transition frames for scroll steps)
-        let action_result = execute_action(&browser, step, &config.base_url).await?;
-
-        // For scroll actions, the smooth scroll + frame capture replaces the idle wait.
-        // For other actions, wait for things to settle.
-        if action_result.transition_frames.is_empty() {
-            let delay = step.delay.unwrap_or(config.default_delay);
-            browser.wait_idle(delay).await;
+        if let Err(e) = step_result {
+            pb.finish_and_clear();
+            // Capture debugging context while the failed page is still open.
+            let page_url = get_current_url(&browser).await;
+            let debug_screenshot = save_debug_screenshot(&browser, output_path, i + 1).await;
+            step_results.push(StepOutput {
+                index: i,
+                name: step.name.clone(),
+                action: step.action.clone(),
+                selector: step.selector.clone(),
+                status: "failed",
+                error: Some(e.to_string()),
+                annotation_warnings: None,
+            });
+            failure = Some(StepFailure {
+                step_index: i,
+                action: step.action.clone(),
+                selector: step.selector.clone(),
+                message: e.to_string(),
+                category: e.error_category(),
+                exit_code: e.exit_code(),
+                page_url,
+                debug_screenshot,
+            });
+            break;
         }
-
-        if !capture_before_action {
-            scene_url = get_current_url(&browser).await;
-            overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
-            let png = browser.screenshot().await?;
-            screenshots.push(png);
-        }
-
-        let ResolvedOverlays {
-            highlight: step_highlight,
-            blurs: step_blurs,
-            arrows: step_arrows,
-            hotspots: step_hotspots,
-            popups: step_popups,
-            zooms: step_zooms,
-        } = overlays;
-
-        // Build transition frame paths and store the frame data
-        let step_idx = i;
-        let transition_frame_paths: Option<Vec<String>> =
-            if !action_result.transition_frames.is_empty() {
-                let paths: Vec<String> = (0..action_result.transition_frames.len())
-                    .map(|f| format!("transitions/{step_idx}/{f}.webp"))
-                    .collect();
-                all_transition_frames.insert(step_idx, action_result.transition_frames);
-                Some(paths)
-            } else {
-                None
-            };
-
-        manifest_steps.push(BundleManifestStep {
-            file: format!("steps/{step_idx}.webp"),
-            name: step.name.clone(),
-            action: Some(step.action.clone()),
-            url: scene_url.clone(),
-            current_path: scene_url
-                .as_deref()
-                .and_then(|url| url.strip_prefix(config.base_url.trim_end_matches('/')))
-                .map(|path| {
-                    if path.is_empty() {
-                        "/".to_string()
-                    } else {
-                        path.to_string()
-                    }
-                }),
-            target_url: step.url.clone(),
-            selector: step.selector.clone(),
-            selector_quality: step.selector_quality.clone(),
-            highlights: step_highlight.map(|a| vec![a]),
-            blur_regions: if step_blurs.is_empty() {
-                None
-            } else {
-                Some(step_blurs)
-            },
-            arrows: if step_arrows.is_empty() {
-                None
-            } else {
-                Some(step_arrows)
-            },
-            hotspots: if step_hotspots.is_empty() {
-                None
-            } else {
-                Some(step_hotspots)
-            },
-            popups: if step_popups.is_empty() {
-                None
-            } else {
-                Some(step_popups)
-            },
-            zoom_regions: if step_zooms.is_empty() {
-                None
-            } else {
-                Some(step_zooms)
-            },
-            text: step.text.clone(),
-            key: step.key.clone(),
-            scroll_x: step.scroll_x,
-            scroll_y: step.scroll_y,
-            scene_scroll_x: step.scene_scroll_x,
-            scene_scroll_y: step.scene_scroll_y,
-            value: step.value.clone(),
-            delay: step.delay,
-            transition_frames: transition_frame_paths,
-        });
 
         let step_warnings: Vec<AnnotationWarning> = drift[drift_start..]
             .iter()
@@ -302,6 +452,10 @@ pub async fn record_tutorial(
         });
 
         pb.inc(1);
+    }
+
+    if failure.is_some() {
+        return Ok((step_results, failure));
     }
 
     pb.finish_with_message("done");
@@ -335,7 +489,26 @@ pub async fn record_tutorial(
 
     create_bundle(&manifest, &screenshots, &all_transition_frames, output_path)?;
 
-    Ok(step_results)
+    Ok((step_results, None))
+}
+
+/// Best-effort screenshot of the page as it looked when a step failed,
+/// saved next to the would-be bundle as `<key>.failed-step-<n>.png`.
+async fn save_debug_screenshot(
+    browser: &Browser,
+    output_path: &Path,
+    step_num: usize,
+) -> Option<PathBuf> {
+    let png = browser.screenshot().await.ok()?;
+    let stem = output_path.file_stem()?.to_str()?;
+    let path = output_path.with_file_name(format!("{stem}.failed-step-{step_num}.png"));
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(&path, png).ok()?;
+    Some(path)
 }
 
 async fn wait_for_step_target(browser: &Browser, step: &StepConfig) -> Result<(), CliError> {

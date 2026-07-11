@@ -134,6 +134,11 @@ pub async fn run(
                 );
                 println!("  Uploaded! Demo ID: {demo_id}");
                 println!("  View at: {view_url}");
+                if !public {
+                    println!(
+                        "  New demos start private — publish and get embed code from that page."
+                    );
+                }
                 results.push(UploadResult { demo_id, view_url });
             } else {
                 return Err(upload_error("Upload", resp).await);

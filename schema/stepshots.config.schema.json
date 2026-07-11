@@ -1,0 +1,631 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StepshotsConfig",
+  "description": "Top-level config from `stepshots.config.json`.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "JSON Schema reference for editor autocomplete and validation.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "baseUrl": {
+      "description": "Base URL prepended to every relative tutorial and step URL, e.g. \"https://app.example.com\".",
+      "type": "string"
+    },
+    "defaultDelay": {
+      "description": "Milliseconds to wait after each action before capturing, unless a step sets its own `delay`.",
+      "type": "integer",
+      "format": "uint64",
+      "default": 500,
+      "minimum": 0
+    },
+    "format": {
+      "description": "Named viewport preset (e.g. \"desktop\", \"mobile\"). Overrides `viewport` unless \"custom\".",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DemoFormat"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "theme": {
+      "description": "Color scheme for recording: \"dark\" or \"light\". Defaults to browser default.",
+      "type": "string",
+      "enum": [
+        "light",
+        "dark"
+      ]
+    },
+    "tutorials": {
+      "description": "Tutorials to record, keyed by a short slug that becomes the output file name.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/TutorialConfig"
+      }
+    },
+    "viewport": {
+      "description": "Browser viewport in CSS pixels. Ignored when `format` names a preset.",
+      "$ref": "#/$defs/Viewport",
+      "default": {
+        "height": 800,
+        "width": 1280
+      }
+    }
+  },
+  "required": [
+    "baseUrl",
+    "tutorials"
+  ],
+  "$defs": {
+    "ArrowConfig": {
+      "description": "Arrow config — resolved from two CSS selectors to element center points.",
+      "type": "object",
+      "properties": {
+        "color": {
+          "description": "Arrow color as a CSS color value.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "curvature": {
+          "description": "Curve amount from -1.0 (bend left) to 1.0 (bend right); 0 is straight.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "fromSelector": {
+          "description": "CSS selector of the element the arrow starts from.",
+          "type": "string"
+        },
+        "strokeWidth": {
+          "description": "Stroke width in pixels.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "toSelector": {
+          "description": "CSS selector of the element the arrow points to.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fromSelector",
+        "toSelector"
+      ]
+    },
+    "BlurConfig": {
+      "description": "Blur region config — resolved from CSS selector to element bounds.",
+      "type": "object",
+      "properties": {
+        "selector": {
+          "description": "CSS selector of the element to blur.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector"
+      ]
+    },
+    "DemoFormat": {
+      "description": "Preset format for demo recording viewport dimensions.",
+      "type": "string",
+      "enum": [
+        "desktop-hd",
+        "desktop",
+        "tablet-landscape",
+        "tablet-portrait",
+        "mobile",
+        "mobile-landscape",
+        "square",
+        "custom"
+      ]
+    },
+    "ElementBounds": {
+      "description": "Pixel coordinates for a highlight region.\n\nThe optional `z_index` is only meaningful when `ElementBounds` is used directly\nas an overlay (e.g. `BundleManifestStep.blur_regions`). When nested as a sub-`bounds`\nfield on another overlay (e.g. `HighlightEntry.bounds`, `ZoomRegion.bounds`), the\noverlay's own `z_index` governs paint order and this field stays `None`.",
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "number",
+          "format": "double"
+        },
+        "width": {
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        },
+        "z_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ]
+    },
+    "HighlightConfig": {
+      "description": "Highlight config for a step in the recording config.",
+      "type": "object",
+      "properties": {
+        "arrow": {
+          "description": "Draw an arrow from the callout to the element.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "bounds": {
+          "description": "Explicit pixel bounds. When set, wins over selector resolution.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElementBounds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "callout": {
+          "description": "Text shown in a callout next to the highlight.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "description": "Highlight color as a CSS color value, e.g. \"#7c3aed\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "position": {
+          "description": "Where the callout is placed relative to the element: top, bottom, left, or right.",
+          "type": "string",
+          "enum": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ]
+        },
+        "showBorder": {
+          "description": "Draw a border around the highlighted element (defaults to true).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "HotspotConfig": {
+      "description": "Hotspot config — resolved from CSS selector to element center point.",
+      "type": "object",
+      "properties": {
+        "callout": {
+          "description": "Text shown in a callout next to the hotspot.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "description": "Hotspot color as a CSS color value.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isClickTarget": {
+          "description": "Whether clicking the hotspot advances the demo.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "position": {
+          "description": "Where the callout is placed relative to the element: top, bottom, left, or right.",
+          "type": "string",
+          "enum": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ]
+        },
+        "selector": {
+          "description": "CSS selector of the element the hotspot is centered on.",
+          "type": "string"
+        },
+        "size": {
+          "description": "Hotspot diameter in pixels.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "selector"
+      ]
+    },
+    "PopupConfig": {
+      "description": "Popup config — resolved from CSS selector to element center point.",
+      "type": "object",
+      "properties": {
+        "body": {
+          "description": "Popup body text.",
+          "type": "string"
+        },
+        "buttonText": {
+          "description": "Optional button label displayed at the bottom of the popup.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "buttonUrl": {
+          "description": "Optional URL the button links to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "description": "Background color as a CSS color value.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "openInNewTab": {
+          "description": "Whether the button opens in a new tab.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "selector": {
+          "description": "CSS selector of the element the popup is anchored to.",
+          "type": "string"
+        },
+        "size": {
+          "description": "Size token: \"xs\", \"sm\", \"md\", \"lg\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "style": {
+          "description": "Rendering style: \"card\" (default) or \"button\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "textColor": {
+          "description": "Text color as a CSS color value.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "Popup heading.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variant": {
+          "description": "Visual variant: \"primary\", \"secondary\", \"ghost\", etc.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "description": "Popup width in pixels.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "selector",
+        "body"
+      ]
+    },
+    "StepConfig": {
+      "description": "A single step action in a tutorial.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "What this step does: click, type, key, scroll, scroll-to, hover, navigate, wait, or select.",
+          "type": "string",
+          "enum": [
+            "click",
+            "type",
+            "key",
+            "scroll",
+            "scroll-to",
+            "hover",
+            "navigate",
+            "wait",
+            "select"
+          ]
+        },
+        "arrows": {
+          "description": "Arrows drawn between two elements on this step's screenshot.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArrowConfig"
+          }
+        },
+        "blurRegions": {
+          "description": "Regions blurred on this step's screenshot (e.g. to hide sensitive data).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BlurConfig"
+          }
+        },
+        "delay": {
+          "description": "Milliseconds to wait after this action, overriding the config `defaultDelay`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "highlightSelector": {
+          "description": "Optional CSS selector used only for resolving highlight bounds.\nWhen set, overrides `selector` for highlight resolution so that\naction steps (scroll, navigate) can target one element while\nhighlighting another.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "highlights": {
+          "description": "Highlight annotations drawn on this step's screenshot.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HighlightConfig"
+          }
+        },
+        "hotspots": {
+          "description": "Pulsing hotspot markers placed on elements.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HotspotConfig"
+          }
+        },
+        "key": {
+          "description": "Key to press for the \"key\" action, e.g. \"Enter\" or \"Escape\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Optional label for the step, shown in progress output and the dashboard.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "popups": {
+          "description": "Popup cards anchored to elements.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PopupConfig"
+          }
+        },
+        "sceneScrollX": {
+          "description": "Horizontal scroll position the page is restored to before this step's capture.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "sceneScrollY": {
+          "description": "Vertical scroll position the page is restored to before this step's capture.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "scrollX": {
+          "description": "Horizontal scroll distance in pixels for the \"scroll\" action.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "scrollY": {
+          "description": "Vertical scroll distance in pixels for the \"scroll\" action.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "selector": {
+          "description": "CSS selector of the element this action targets. Required for click, type, hover, and select.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectorQuality": {
+          "description": "How the selector was derived (informational, set by recording tools).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "Text to enter. Required for the \"type\" action. Supports `${ENV_VAR}` interpolation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Target URL for the \"navigate\" action — absolute, or relative to `baseUrl`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "Option value to choose for the \"select\" action.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zoomRegions": {
+          "description": "Regions the viewer zooms into on this step.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ZoomConfig"
+          }
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "TutorialConfig": {
+      "description": "A single tutorial within the config.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "Optional longer description of what the tutorial shows.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "steps": {
+          "description": "Ordered actions to perform; each step becomes one screenshot in the demo.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StepConfig"
+          }
+        },
+        "title": {
+          "description": "Human-readable title, shown in the dashboard and used as the demo title on upload.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Start page for the tutorial — absolute, or relative to the config `baseUrl`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "title",
+        "steps"
+      ]
+    },
+    "Viewport": {
+      "description": "Viewport dimensions.",
+      "type": "object",
+      "properties": {
+        "deviceScaleFactor": {
+          "description": "Device pixel ratio, e.g. 2.0 for retina-quality screenshots.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "height": {
+          "description": "Height in CSS pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "width": {
+          "description": "Width in CSS pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ]
+    },
+    "ZoomConfig": {
+      "description": "Zoom region config — resolved from CSS selector to element bounds.",
+      "type": "object",
+      "properties": {
+        "delay": {
+          "description": "Zoom animation start delay in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "duration": {
+          "description": "Zoom animation duration in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "magnification": {
+          "description": "Zoom factor, e.g. 2.0 for 2x.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "selector": {
+          "description": "CSS selector of the element to zoom into.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector"
+      ]
+    }
+  }
+}

@@ -70,6 +70,8 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Print the JSON Schema for stepshots.config.json
+    Schema,
     /// Record tutorials into .stepshot bundles
     Record {
         /// Record only specific tutorials (by key). Records all if omitted.
@@ -191,6 +193,9 @@ async fn main() {
 
     let json = cli.json;
     if let Err(e) = run(cli).await {
+        if let CliError::Reported { code } = e {
+            std::process::exit(code);
+        }
         if json {
             let output = serde_json::json!({
                 "success": false,
@@ -221,6 +226,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         }
         Commands::Init { force } => {
             commands::init::run(force)?;
+        }
+        Commands::Schema => {
+            commands::schema::run()?;
         }
         Commands::Record {
             tutorial,

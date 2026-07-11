@@ -149,7 +149,7 @@ async fn handle_record(
     )
     .await
     {
-        Ok(_) => {
+        Ok((_, None)) => {
             let dir = output_dir
                 .canonicalize()
                 .unwrap_or(output_dir.clone())
@@ -164,6 +164,18 @@ async fn handle_record(
                 }),
             )
         }
+        Ok((_, Some(failure))) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(RecordResponse {
+                ok: false,
+                dir: None,
+                error: Some(format!(
+                    "Step {} failed: {}",
+                    failure.step_index + 1,
+                    failure.message
+                )),
+            }),
+        ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(RecordResponse {
@@ -219,8 +231,15 @@ async fn handle_upload(
     let file_path = bundle_path.display().to_string();
     let files = vec![file_path];
 
-    match crate::commands::upload::run(&files, Some(&req.title), None, &req.stepshots_url, &token)
-        .await
+    match crate::commands::upload::run(
+        &files,
+        Some(&req.title),
+        None,
+        false,
+        &req.stepshots_url,
+        &token,
+    )
+    .await
     {
         Ok(results) => {
             let first = results.into_iter().next();

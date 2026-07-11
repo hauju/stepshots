@@ -7,7 +7,7 @@ description: |
   sharing or embedding, keep a demo fresh from CI, or turn an existing saved Stepshots
   demo into a CLI recording config. Works for both CLI-first and AI-assisted workflows.
 author: Hauke Jung
-version: 2.1.0
+version: 2.2.0
 ---
 
 # Stepshots CLI Screenshot Demo Skill
@@ -472,7 +472,12 @@ Use `--json` for machine-parseable output from `inspect` and `record`:
 stepshots inspect https://example.com --json    # Discover selectors
 stepshots record --dry-run --json               # Validate config
 stepshots record -t tutorial-key --json         # Record with structured result
+stepshots schema                                # JSON Schema for stepshots.config.json
 ```
+
+`stepshots schema` prints the full JSON Schema for the config file — use it as the
+authoritative field reference when generating configs. Configs written by
+`stepshots init` carry a `$schema` key so editors validate them too.
 
 In `--json` mode, the only stdout output is a single JSON object. Human-readable messages are suppressed. Progress bars and warnings go to stderr. `upload` prints human-readable output (including the demo URL); errors from any command are emitted as JSON when `--json` is set.
 
@@ -495,7 +500,8 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 4. If validation fails, fix the config based on the error JSON
 5. `stepshots record -t <key> --json` — record the demo
 6. Parse JSON result — if a step failed with a selector error:
-   - Run `stepshots inspect <url> --json` to find the correct selector
+   - Read the debug screenshot (`output/<key>.failed-step-<n>.png`) to see the page state
+   - Run `stepshots inspect <url> --json` on the failure-time URL to find the correct selector
    - Update the config and retry
 7. `stepshots upload output/<key>.stepshot` — publish (exit code 5 means auth: run
    `stepshots whoami` to diagnose, then `stepshots login` or set `STEPSHOTS_TOKEN`)
@@ -521,11 +527,27 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 }
 ```
 
-**record** (failure):
+**record** (failure): a failed step aborts its tutorial (no bundle is written), but the
+remaining tutorials still record. The exit code is non-zero and the output contains
+per-step status plus the first failure with its step index and tutorial key. A debug
+screenshot of the page at failure time is saved as `output/<key>.failed-step-<n>.png`
+(1-based step number) — read it to see what the page actually looked like.
+
 ```json
 {
   "success": false,
-  "error": { "category": "action", "message": "Timed out waiting for selector '#btn'" }
+  "command": "record",
+  "tutorials": [{
+    "key": "signup-flow",
+    "title": "Sign Up",
+    "steps_total": 6,
+    "steps_completed": 3,
+    "steps": [
+      { "index": 2, "action": "type", "selector": "input[name='email']", "status": "ok" },
+      { "index": 3, "action": "click", "selector": "#btn", "status": "failed", "error": "Action error: Timed out waiting for selector '#btn' before 'click' action" }
+    ]
+  }],
+  "error": { "category": "action", "message": "Action error: Timed out waiting for selector '#btn' before 'click' action", "step_index": 3, "tutorial": "signup-flow" }
 }
 ```
 

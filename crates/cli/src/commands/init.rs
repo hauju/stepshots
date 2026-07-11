@@ -20,6 +20,12 @@ pub fn run(force: bool) -> Result<(), CliError> {
     println!("Created {CONFIG_FILENAME}");
     println!("Edit it with your website URL and tutorial steps, then run:");
     println!("  stepshots record");
+    println!();
+    println!("Tips:");
+    println!("  - Your editor autocompletes and validates the config via its \"$schema\" entry.");
+    println!(
+        "  - `stepshots inspect <url>` lists a page's interactive elements and CSS selectors."
+    );
 
     Ok(())
 }
