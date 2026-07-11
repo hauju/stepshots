@@ -38,8 +38,12 @@ impl Browser {
                 has_touch: false,
             });
 
+        // chromiumoxide defaults to headless; headed mode must be requested
+        // explicitly or the browser window never appears.
         if headless {
-            builder = builder.arg("--headless=new");
+            builder = builder.new_headless_mode();
+        } else {
+            builder = builder.with_head();
         }
 
         if let Some(dir) = profile_dir {
