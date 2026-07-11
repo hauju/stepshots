@@ -121,6 +121,10 @@ enum Commands {
         #[arg(long)]
         demo_id: Option<String>,
 
+        /// Make new demos publicly viewable immediately (ignored with --demo-id)
+        #[arg(long)]
+        public: bool,
+
         /// Server URL
         #[arg(
             long,
@@ -265,6 +269,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             files,
             title,
             demo_id,
+            public,
             server,
             token,
         } => {
@@ -280,6 +285,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 &files,
                 title.as_deref(),
                 demo_id.as_deref(),
+                public,
                 &server,
                 &token,
             )

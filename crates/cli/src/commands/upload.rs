@@ -14,10 +14,12 @@ pub struct UploadResult {
 
 /// Upload one or more `.stepshot` bundles to the Stepshots API.
 /// If `replace_demo_id` is set, replaces that existing demo instead of creating new ones.
+/// `public` makes newly created demos publicly viewable at insert time.
 pub async fn run(
     files: &[String],
     title_override: Option<&str>,
     replace_demo_id: Option<&str>,
+    public: bool,
     server_url: &str,
     token: &str,
 ) -> Result<Vec<UploadResult>, CliError> {
@@ -90,7 +92,11 @@ pub async fn run(
 
             println!("Uploading: {file_path} as \"{title}\"");
 
-            let form = multipart::Form::new().text("title", title.clone()).part(
+            let mut form = multipart::Form::new().text("title", title.clone());
+            if public {
+                form = form.text("public", "true");
+            }
+            let form = form.part(
                 "bundle",
                 multipart::Part::bytes(bundle_bytes)
                     .file_name(
