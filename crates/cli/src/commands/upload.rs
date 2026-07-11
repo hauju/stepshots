@@ -5,6 +5,7 @@ use manifest::BundleManifest;
 use reqwest::multipart;
 
 use crate::error::CliError;
+use crate::output::{UploadOutput, UploadedDemo};
 
 #[allow(dead_code)]
 pub struct UploadResult {
@@ -15,11 +16,13 @@ pub struct UploadResult {
 /// Upload one or more `.stepshot` bundles to the Stepshots API.
 /// If `replace_demo_id` is set, replaces that existing demo instead of creating new ones.
 /// `public` makes newly created demos publicly viewable at insert time.
+/// `json` suppresses human-readable output and prints a single JSON object instead.
 pub async fn run(
     files: &[String],
     title_override: Option<&str>,
     replace_demo_id: Option<&str>,
     public: bool,
+    json: bool,
     server_url: &str,
     token: &str,
 ) -> Result<Vec<UploadResult>, CliError> {
@@ -36,7 +39,9 @@ pub async fn run(
 
         if let Some(demo_id) = replace_demo_id {
             // Replace existing demo
-            println!("Replacing demo {demo_id} with: {file_path}");
+            if !json {
+                println!("Replacing demo {demo_id} with: {file_path}");
+            }
 
             let form = multipart::Form::new().part(
                 "bundle",
@@ -68,8 +73,10 @@ pub async fn run(
                     "{}/dashboard/demos/{demo_id}",
                     server_url.trim_end_matches('/')
                 );
-                println!("  Replaced! Demo ID: {demo_id}");
-                println!("  View at: {view_url}");
+                if !json {
+                    println!("  Replaced! Demo ID: {demo_id}");
+                    println!("  View at: {view_url}");
+                }
                 results.push(UploadResult {
                     demo_id: demo_id.to_string(),
                     view_url,
@@ -90,7 +97,9 @@ pub async fn run(
                 })
             };
 
-            println!("Uploading: {file_path} as \"{title}\"");
+            if !json {
+                println!("Uploading: {file_path} as \"{title}\"");
+            }
 
             let mut form = multipart::Form::new().text("title", title.clone());
             if public {
@@ -132,18 +141,39 @@ pub async fn run(
                     "{}/dashboard/demos/{demo_id}",
                     server_url.trim_end_matches('/')
                 );
-                println!("  Uploaded! Demo ID: {demo_id}");
-                println!("  View at: {view_url}");
-                if !public {
-                    println!(
-                        "  New demos start private — publish and get embed code from that page."
-                    );
+                if !json {
+                    println!("  Uploaded! Demo ID: {demo_id}");
+                    println!("  View at: {view_url}");
+                    if !public {
+                        println!(
+                            "  New demos start private — publish and get embed code from that page."
+                        );
+                    }
                 }
                 results.push(UploadResult { demo_id, view_url });
             } else {
                 return Err(upload_error("Upload", resp).await);
             }
         }
+    }
+
+    if json {
+        let out = UploadOutput {
+            success: true,
+            command: "upload",
+            demos: results
+                .iter()
+                .map(|r| UploadedDemo {
+                    demo_id: r.demo_id.clone(),
+                    view_url: r.view_url.clone(),
+                    replaced: replace_demo_id.is_some(),
+                })
+                .collect(),
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).expect("serializing UploadOutput")
+        );
     }
 
     Ok(results)

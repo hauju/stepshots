@@ -1,6 +1,8 @@
 pub mod browser;
+pub mod doctor;
 pub mod init;
 pub mod inspect;
+pub mod list;
 pub mod preview;
 pub mod record;
 pub mod schema;

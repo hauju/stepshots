@@ -71,9 +71,12 @@ impl Browser {
             .build()
             .map_err(|e| CliError::Browser(format!("Failed to build browser config: {e}")))?;
 
-        let (browser, mut handler) = CdpBrowser::launch(config)
-            .await
-            .map_err(|e| CliError::Browser(format!("Failed to launch browser: {e}")))?;
+        let (browser, mut handler) = CdpBrowser::launch(config).await.map_err(|e| {
+            CliError::Browser(format!(
+                "Failed to launch browser: {e}. Install Google Chrome or Chromium, \
+                 or set CHROME_PATH to the executable. Run `stepshots doctor` to check your setup."
+            ))
+        })?;
 
         let handle = tokio::spawn(async move {
             while let Some(event) = handler.next().await {

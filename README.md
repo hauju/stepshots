@@ -37,11 +37,14 @@ Creates a `stepshots.config.json` with a sample tutorial definition. The file ca
 ### Record tutorials
 
 ```sh
+# See what's defined in the config
+stepshots list
+
 # Record all tutorials defined in the config
 stepshots record
 
 # Record a specific tutorial
-stepshots record --tutorial my-tutorial
+stepshots record my-tutorial
 
 # Preview in a visible browser
 stepshots preview my-tutorial
@@ -93,6 +96,24 @@ stepshots upload output/my-tutorial.stepshot --server https://your-instance.com
 ```
 
 Uploads use your `stepshots login` session, or `STEPSHOTS_TOKEN` / `--token` when set. Override the server with `--server` or `STEPSHOTS_SERVER`.
+
+### Check your setup
+
+```sh
+stepshots doctor
+```
+
+Verifies your browser (Chrome/Chromium + version), config file, server reachability, and login in one pass — run it first when something misbehaves, and include its output in bug reports.
+
+### Shell completions
+
+```sh
+# fish
+stepshots completions fish > ~/.config/fish/completions/stepshots.fish
+
+# zsh / bash / powershell / elvish work the same way
+stepshots completions zsh
+```
 
 ### Upgrade
 

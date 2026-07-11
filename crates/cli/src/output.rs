@@ -98,3 +98,57 @@ pub struct ErrorOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tutorial: Option<String>,
 }
+
+/// JSON output for `upload --json`.
+#[derive(Serialize)]
+pub struct UploadOutput {
+    pub success: bool,
+    pub command: &'static str,
+    pub demos: Vec<UploadedDemo>,
+}
+
+#[derive(Serialize)]
+pub struct UploadedDemo {
+    pub demo_id: String,
+    pub view_url: String,
+    /// True when an existing demo was replaced via --demo-id.
+    pub replaced: bool,
+}
+
+/// JSON output for `list --json`.
+#[derive(Serialize)]
+pub struct ListOutput {
+    pub success: bool,
+    pub command: &'static str,
+    pub config: String,
+    pub tutorials: Vec<ListTutorial>,
+}
+
+#[derive(Serialize)]
+pub struct ListTutorial {
+    pub key: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub steps: usize,
+}
+
+/// JSON output for `doctor --json`.
+#[derive(Serialize)]
+pub struct DoctorOutput {
+    pub success: bool,
+    pub command: &'static str,
+    pub version: &'static str,
+    pub checks: Vec<DoctorCheck>,
+}
+
+/// A single doctor check result.
+#[derive(Serialize)]
+pub struct DoctorCheck {
+    pub name: &'static str,
+    /// "ok", "warn" (works for some flows), or "fail" (broken).
+    pub status: &'static str,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}

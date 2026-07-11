@@ -470,8 +470,11 @@ Use `--json` for machine-parseable output from `inspect` and `record`:
 
 ```bash
 stepshots inspect https://example.com --json    # Discover selectors
+stepshots list --json                           # Tutorials defined in the config
 stepshots record --dry-run --json               # Validate config
-stepshots record -t tutorial-key --json         # Record with structured result
+stepshots record tutorial-key --json            # Record with structured result
+stepshots upload output/key.stepshot --json     # Upload, returns demo_id + view_url
+stepshots doctor --json                         # Environment checks (browser/config/server/auth)
 stepshots schema                                # JSON Schema for stepshots.config.json
 ```
 
@@ -479,7 +482,7 @@ stepshots schema                                # JSON Schema for stepshots.conf
 authoritative field reference when generating configs. Configs written by
 `stepshots init` carry a `$schema` key so editors validate them too.
 
-In `--json` mode, the only stdout output is a single JSON object. Human-readable messages are suppressed. Progress bars and warnings go to stderr. `upload` prints human-readable output (including the demo URL); errors from any command are emitted as JSON when `--json` is set.
+In `--json` mode, the only stdout output is a single JSON object. Human-readable messages are suppressed. Progress bars and warnings go to stderr. `upload --json` returns `{"demos": [{"demo_id", "view_url", "replaced"}]}`; errors from any command are emitted as JSON when `--json` is set.
 
 ### Exit Codes
 
@@ -503,8 +506,12 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
    - Read the debug screenshot (`output/<key>.failed-step-<n>.png`) to see the page state
    - Run `stepshots inspect <url> --json` on the failure-time URL to find the correct selector
    - Update the config and retry
-7. `stepshots upload output/<key>.stepshot` — publish (exit code 5 means auth: run
-   `stepshots whoami` to diagnose, then `stepshots login` or set `STEPSHOTS_TOKEN`)
+7. `stepshots upload output/<key>.stepshot --json` — publish, parse `demo_id` and
+   `view_url` from the result (exit code 5 means auth: run `stepshots doctor --json`
+   to see what's wrong, then `stepshots login` or set `STEPSHOTS_TOKEN`)
+
+If the environment itself seems broken (browser missing, server unreachable), run
+`stepshots doctor --json` — it checks browser, config, server, and auth in one call.
 
 ### JSON Output Shapes
 

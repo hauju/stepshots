@@ -74,8 +74,12 @@ enum Commands {
     Schema,
     /// Record tutorials into .stepshot bundles
     Record {
-        /// Record only specific tutorials (by key). Records all if omitted.
-        #[arg(long, short)]
+        /// Tutorials to record (by key). Records all if omitted.
+        #[arg(value_name = "TUTORIAL")]
+        tutorials: Vec<String>,
+
+        /// Tutorial to record (same as the positional argument)
+        #[arg(long, short, value_name = "TUTORIAL")]
         tutorial: Vec<String>,
 
         /// Output directory for .stepshot files
@@ -90,6 +94,8 @@ enum Commands {
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
     },
+    /// List the tutorials defined in the config
+    List,
     /// Preview a tutorial in a visible browser
     Preview {
         /// Tutorial key to preview
@@ -153,6 +159,22 @@ enum Commands {
         /// Persistent browser profile directory (for authenticated pages)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
+    },
+    /// Check your setup: browser, config, server, and login
+    Doctor {
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+    },
+    /// Generate shell completions (bash, zsh, fish, powershell, elvish)
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
     },
     /// Upgrade stepshots to the latest version
     Upgrade {
@@ -231,11 +253,14 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             commands::schema::run()?;
         }
         Commands::Record {
+            tutorials,
             tutorial,
             output,
             dry_run,
             profile_dir,
         } => {
+            let mut selected = tutorials;
+            selected.extend(tutorial);
             let config_path = config::find_config(cli.config.as_deref())?;
             let config = config::load_config(&config_path)?;
             if !json {
@@ -243,13 +268,18 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             }
             commands::record::run(
                 &config,
-                &tutorial,
+                &selected,
                 &output,
                 dry_run,
                 json,
                 profile_dir.as_deref(),
             )
             .await?;
+        }
+        Commands::List => {
+            let config_path = config::find_config(cli.config.as_deref())?;
+            let config = config::load_config(&config_path)?;
+            commands::list::run(&config, &config_path, json)?;
         }
         Commands::Preview {
             tutorial,
@@ -294,6 +324,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 title.as_deref(),
                 demo_id.as_deref(),
                 public,
+                json,
                 &server,
                 &token,
             )
@@ -317,6 +348,18 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 }
             };
             commands::inspect::run(&url, width, height, json, profile_dir.as_deref()).await?;
+        }
+        Commands::Doctor { server } => {
+            commands::doctor::run(&server, cli.config.as_deref(), json).await?;
+        }
+        Commands::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "stepshots",
+                &mut std::io::stdout(),
+            );
         }
         Commands::Upgrade { force, check } => {
             commands::upgrade::run(force, check).await?;

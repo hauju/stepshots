@@ -236,6 +236,7 @@ async fn handle_upload(
         Some(&req.title),
         None,
         false,
+        false,
         &req.stepshots_url,
         &token,
     )

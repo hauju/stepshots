@@ -19,6 +19,7 @@ schemars = "1"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "net", "io-util"] }
