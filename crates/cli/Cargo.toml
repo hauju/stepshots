@@ -14,7 +14,7 @@ name = "stepshots"
 path = "src/main.rs"
 
 [dependencies]
-manifest = { path = "../manifest", version = "1.0.1", package = "stepshots-manifest", features = ["schema"] }
+manifest = { path = "../manifest", version = "1.2.0", package = "stepshots-manifest", features = ["schema"] }
 schemars = "1"
 
 # CLI
