@@ -1,21 +1,29 @@
 name: "Stepshots Record"
-description: "Record interactive product demos with Stepshots CLI"
+description: "Record and verify interactive product demos with Stepshots CLI"
 branding:
   icon: "camera"
   color: "purple"
 
 inputs:
+  command:
+    description: "What to run: record (capture bundles) or verify (drift check, writes no bundles)"
+    required: false
+    default: "record"
   config:
     description: "Path to stepshots.config.json"
     required: false
     default: "stepshots.config.json"
   tutorials:
-    description: "Comma-separated tutorial keys to record (default: all)"
+    description: "Comma-separated tutorial keys to record or verify (default: all)"
     required: false
   output:
-    description: "Output directory for .stepshot bundles"
+    description: "Output directory for .stepshot bundles (record) or failure screenshots and the report (verify)"
     required: false
     default: "output"
+  fail-on:
+    description: "Verify only: fail the step on 'fail' (broken steps) or 'warn' (also annotation drift)"
+    required: false
+    default: "fail"
   upload:
     description: "Upload bundles after recording"
     required: false
@@ -40,8 +48,11 @@ inputs:
 
 outputs:
   bundles:
-    description: "Newline-separated list of recorded .stepshot files"
+    description: "Newline-separated list of recorded .stepshot files (record command only)"
     value: ${{ steps.record.outputs.bundles }}
+  report:
+    description: "Path to the verify JSON report (verify command only)"
+    value: ${{ steps.verify.outputs.report }}
 
 runs:
   using: "composite"
@@ -68,6 +79,7 @@ runs:
         chrome-version: stable
 
     - name: Record tutorials
+      if: inputs.command == 'record'
       id: record
       shell: bash
       env:
@@ -94,8 +106,58 @@ runs:
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
 
+    - name: Verify tutorials
+      if: inputs.command == 'verify'
+      id: verify
+      shell: bash
+      env:
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_TUTORIALS: ${{ inputs.tutorials }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        ARGS=(--config "$INPUT_CONFIG" --save-failures "$INPUT_OUTPUT" --fail-on "$INPUT_FAIL_ON")
+
+        if [ -n "$INPUT_TUTORIALS" ]; then
+          IFS=',' read -ra TUTORIALS <<< "$INPUT_TUTORIALS"
+          for t in "${TUTORIALS[@]}"; do
+            trimmed="${t#"${t%%[![:space:]]*}"}"
+            trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+            ARGS+=(--tutorial "$trimmed")
+          done
+        fi
+
+        mkdir -p "$INPUT_OUTPUT"
+        REPORT="$INPUT_OUTPUT/verify-report.json"
+
+        EXIT=0
+        stepshots verify "${ARGS[@]}" --json > "$REPORT" || EXIT=$?
+        echo "report=$REPORT" >> "$GITHUB_OUTPUT"
+
+        if jq -e '.summary' "$REPORT" > /dev/null 2>&1; then
+          {
+            echo "## Demo freshness"
+            jq -r '"\(.summary.ok) fresh · \(.summary.warn) warning(s) · \(.summary.fail) broken"' "$REPORT"
+            echo ""
+            jq -r '.tutorials[] |
+              if .status == "fail" then
+                "- ❌ `\(.key)` — " + ((.error // ([.steps[] | select(.status == "fail")][0])) | "\(.message)\n  - hint: \(.hint)")
+              elif .status == "warn" then
+                "- ⚠️ `\(.key)` — \(.annotation_warnings | length) annotation(s) drifted"
+              else
+                "- ✅ `\(.key)` — ok"
+              end' "$REPORT"
+          } >> "$GITHUB_STEP_SUMMARY"
+        else
+          # The CLI failed before producing a report (config/browser error) —
+          # surface the error JSON in the log.
+          cat "$REPORT"
+        fi
+
+        exit "$EXIT"
+
     - name: Upload bundles
-      if: inputs.upload == 'true'
+      if: inputs.upload == 'true' && inputs.command == 'record'
       shell: bash
       env:
         STEPSHOTS_TOKEN: ${{ inputs.token }}

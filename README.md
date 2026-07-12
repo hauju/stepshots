@@ -52,6 +52,29 @@ stepshots preview my-tutorial
 
 If a step fails (usually a selector that no longer matches), the CLI saves a screenshot of the page at failure time (`output/<key>.failed-step-<n>.png`), prints the page URL, and continues with the remaining tutorials. Use `stepshots inspect <url>` to find the right selector and `stepshots preview <key>` to watch the flow live.
 
+### Verify demos are still up to date
+
+```sh
+# Replay all tutorials against the live app without writing bundles
+stepshots verify
+
+# Verify one tutorial, and treat annotation drift as a failure too
+stepshots verify my-tutorial --fail-on warn
+```
+
+`verify` replays each tutorial headless and reports drift instead of recording: selectors that no longer match, start pages that fail to load, and annotations that lost their anchor. Exit code 0 means everything is fresh; 1 means drift was found. Add `--json` for a machine-readable report (for CI and AI agents) with a repair hint per failure; failure screenshots land in `output/` (change with `--save-failures`).
+
+To check demos on a schedule in CI, use the GitHub Action with `command: verify`:
+
+```yaml
+- uses: hauju/stepshots@main
+  with:
+    command: verify
+    config: demo/stepshots.config.json
+```
+
+The step fails when drift is found and writes a freshness summary to the job summary, plus `output/verify-report.json` for tooling.
+
 ### Record logged-in flows
 
 Recordings run in a fresh headless browser, so sites you're normally signed in to appear logged out. To record an authenticated flow, log in once inside a persistent browser profile, then point recordings at it:

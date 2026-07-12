@@ -1,13 +1,15 @@
 ---
 name: stepshots-cli-record
 description: |
-  Create, record, and publish screenshot-based product demos with the Stepshots CLI from
-  natural-language flow descriptions. Use when a user wants to record a clickthrough demo
-  or product tour, generate or edit stepshots.config.json, upload/publish a demo for
-  sharing or embedding, keep a demo fresh from CI, or turn an existing saved Stepshots
-  demo into a CLI recording config. Works for both CLI-first and AI-assisted workflows.
+  Create, record, verify, and publish screenshot-based product demos with the Stepshots
+  CLI from natural-language flow descriptions. Use when a user wants to record a
+  clickthrough demo or product tour, generate or edit stepshots.config.json, upload/publish
+  a demo for sharing or embedding, check whether recorded demos are still up to date
+  (demo drift detection with `stepshots verify`), repair a drifted demo, keep a demo
+  fresh from CI, or turn an existing saved Stepshots demo into a CLI recording config.
+  Works for both CLI-first and AI-assisted workflows.
 author: Hauke Jung
-version: 2.2.0
+version: 2.3.0
 ---
 
 # Stepshots CLI Screenshot Demo Skill
@@ -349,10 +351,52 @@ Use:
 - `record --dry-run` to validate config structure
 - `record` for final capture
 
-## Keeping Demos Fresh from CI
+## Keeping Demos Fresh
 
-To re-record and update a demo whenever the product changes, use the composite GitHub
-Action from `hauju/stepshots` with a repo secret and the existing demo's id:
+Freshness is a two-part loop: **verify detects drift, then a human or agent repairs it.**
+Never promise fully automatic re-recording — detection is reliable, blind repair is not.
+
+### Detect drift with `verify`
+
+```bash
+stepshots verify                         # replay all tutorials headless, no bundle written
+stepshots verify my-tutorial --fail-on warn   # one tutorial, annotation drift also fails
+stepshots verify --json                  # machine-readable drift report for agents/CI
+```
+
+Exit code 0 means every checked tutorial still replays; 1 means drift was found (or the
+config was invalid). A step that fails gets a debug screenshot (`output/<key>.failed-step-<n>.png`,
+override the directory with `--save-failures`) and a repair hint in the report. Annotation
+drift (a highlight/blur/arrow anchor that vanished or moved off-screen) is warn-level by
+default: the demo still records, but the annotation would be dropped.
+
+### Verify on a schedule in CI
+
+Use the composite GitHub Action with `command: verify` to catch stale demos before users do:
+
+```yaml
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # weekly
+jobs:
+  demo-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hauju/stepshots@main
+        with:
+          command: verify
+          config: demo/stepshots.config.json
+```
+
+The step fails when drift is found, writes a per-tutorial freshness summary to the job
+summary, and saves `output/verify-report.json` for tooling. Authenticated flows need a
+`profile-dir`-style setup or a staging environment reachable from CI.
+
+### Re-record and update in place
+
+To re-record and update a demo whenever the product changes, use the same action in
+record mode with a repo secret and the existing demo's id:
 
 ```yaml
 - uses: hauju/stepshots@main
@@ -473,6 +517,7 @@ stepshots inspect https://example.com --json    # Discover selectors
 stepshots list --json                           # Tutorials defined in the config
 stepshots record --dry-run --json               # Validate config
 stepshots record tutorial-key --json            # Record with structured result
+stepshots verify --json                         # Drift report: do demos still replay?
 stepshots upload output/key.stepshot --json     # Upload, returns demo_id + view_url
 stepshots doctor --json                         # Environment checks (browser/config/server/auth)
 stepshots schema                                # JSON Schema for stepshots.config.json
@@ -495,6 +540,10 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 | 4 | Bundle error (ZIP/manifest issue) |
 | 5 | Upload / auth error |
 
+`verify` exits 1 both for drift and for config errors — branch on the JSON instead of
+the exit code: drift reports have a `summary` object, config errors have a top-level
+`error` object.
+
 ### Recommended AI Agent Workflow
 
 1. `stepshots inspect <url> --json` — discover page selectors
@@ -512,6 +561,31 @@ In `--json` mode, the only stdout output is a single JSON object. Human-readable
 
 If the environment itself seems broken (browser missing, server unreachable), run
 `stepshots doctor --json` — it checks browser, config, server, and auth in one call.
+
+### Demo Drift Repair Workflow
+
+When asked to check or fix stale demos, run `stepshots verify --json` and repair from
+the report. Each failed step carries the repair contract: `reason`, `page_url`,
+`screenshot`, and a `hint` naming the next command.
+
+1. `stepshots verify --json` — replay every tutorial, collect the drift report
+2. For each `"status": "fail"` step, branch on `reason`:
+   - `orphaned` — the selector matched nothing. Read the `screenshot` to see the page,
+     run `stepshots inspect <page_url> --json`, pick a stable replacement selector,
+     update that step in the config
+   - `navigation_failed` — the URL no longer loads. Fix the step's `url` (or the
+     tutorial `url` / `baseUrl` when the tutorial-level `error` is set)
+   - `action_failed` — the element exists but the action broke (e.g. a `select` value
+     that's gone). Read the screenshot and adjust the step
+3. For `annotation_warnings` (warn-level), fix the annotation's selector or drop the
+   annotation — the flow itself still works
+4. Re-run `stepshots verify -t <key> --json` until it exits 0
+5. Re-record with `stepshots record -t <key> --json`, then republish with
+   `stepshots upload output/<key>.stepshot --demo-id <existing-id>` so embeds and
+   share links stay valid
+
+Show the user what changed in the config before uploading — repair is assisted, not
+silent.
 
 ### JSON Output Shapes
 
@@ -558,6 +632,38 @@ screenshot of the page at failure time is saved as `output/<key>.failed-step-<n>
 }
 ```
 
+**verify**: replays steps without writing bundles. Tutorial `status` is `ok`, `warn`
+(annotation drift only), or `fail`; steps after a failure are `skipped` since the page
+state is undefined. A start page that no longer loads sets a tutorial-level `error`
+instead of a step failure.
+
+```json
+{
+  "success": false,
+  "command": "verify",
+  "config": "stepshots.config.json",
+  "summary": { "tutorials": 2, "ok": 1, "warn": 0, "fail": 1, "steps_checked": 3 },
+  "tutorials": [
+    { "key": "landing-page", "title": "Landing Page", "status": "ok",
+      "steps": [ { "index": 0, "action": "click", "selector": "#cta", "status": "ok" } ] },
+    { "key": "signup-flow", "title": "Sign Up", "status": "fail",
+      "steps": [
+        { "index": 0, "action": "click", "selector": "#open", "status": "ok" },
+        { "index": 1, "action": "click", "selector": "#old-btn", "status": "fail",
+          "reason": "orphaned",
+          "message": "Action error: Timed out waiting for selector '#old-btn' before 'click' action",
+          "page_url": "https://app.example.com/signup",
+          "screenshot": "output/signup-flow.failed-step-2.png",
+          "hint": "Run `stepshots inspect https://app.example.com/signup` to find a replacement selector, then update this step in stepshots.config.json." },
+        { "index": 2, "action": "type", "selector": "#email", "status": "skipped" }
+      ],
+      "annotation_warnings": [
+        { "step": 0, "kind": "highlight", "selector": ".banner", "reason": "off_screen" }
+      ] }
+  ]
+}
+```
+
 **inspect**:
 ```json
 {
@@ -578,5 +684,6 @@ This skill should push AI agents toward:
 - clean config generation
 - CLI preview/record workflows
 - uploading and publishing, not stopping at a local `.stepshot` file
+- `verify` for drift detection, with assisted (never silent) repair
 - dashboard export when a saved demo already exists
 - using `--json` for programmatic feedback loops
