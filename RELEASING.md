@@ -4,7 +4,7 @@ This repo ships two independently-versioned things.
 
 | Component | Version source of truth | Tag | Published to |
 |-----------|-------------------------|-----|--------------|
-| CLI + Chrome extension (the "recorder", released together) | `Cargo.toml` (`workspace.package.version`) **and** `extension/manifest.json` — keep them equal | `vX.Y.Z` | GitHub Release (`.github/workflows/release.yml`) |
+| CLI + Chrome extension (the "recorder", released together) | `Cargo.toml` (`workspace.package.version`) **and** `extension/manifest.json` — keep them equal | `vX.Y.Z` | GitHub Release (`.github/workflows/release.yml`) + crates.io (hand-published) |
 | `@stepshots/react` SDK | `packages/react/package.json` | `react-vX.Y.Z` | npm (hand-published) |
 
 **Rule:** the committed version *is* the source of truth; the tag only has to agree with it.
@@ -20,6 +20,9 @@ fire on `react-v*` tags.
 1. Bump **both** to the new version:
    - `Cargo.toml` → `[workspace.package] version = "X.Y.Z"` (covers `stepshots-cli` and `stepshots-manifest`)
    - `extension/manifest.json` → `"version": "X.Y.Z"` (and `extension/package.json` to match)
+   - If the CLI started using new `stepshots-manifest` APIs or features since the last release,
+     also raise the `version` floor on the `manifest` dependency in `crates/cli/Cargo.toml` —
+     it does **not** move with the workspace bump (see step 7).
 2. Refresh the lockfile: `cargo update -w`
 3. Commit: `chore(release): bump to X.Y.Z`
 4. Tag and push:
@@ -30,6 +33,16 @@ fire on `react-v*` tags.
 5. The `Release` workflow builds the CLI (mac-arm, linux-x64, linux-arm) and the extension zip,
    then opens a **draft** GitHub Release. Review the generated notes and publish it.
 6. Upload the extension zip to the Chrome Web Store manually if needed.
+7. Publish to crates.io — the workflow does **not** do this. Publish in dependency order:
+   ```sh
+   cargo publish -p stepshots-manifest
+   cargo publish -p stepshots-cli
+   ```
+   `stepshots-manifest` must land first: `stepshots-cli`'s registry dependency on it has to
+   resolve. That dependency carries an explicit `version` floor in `crates/cli/Cargo.toml`
+   (required for crates.io) — if the CLI uses manifest APIs or features newer than the floor,
+   raise it to the version that introduced them, or downstream builds can resolve a manifest
+   release that lacks them.
 
 If the tag and committed versions disagree, `check-versions` fails before anything builds — fix
 the versions (or the tag) and retry.
