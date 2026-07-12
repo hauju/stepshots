@@ -3,6 +3,7 @@ use std::sync::Arc;
 use chromiumoxide::Page;
 use chromiumoxide::browser::{Browser as CdpBrowser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+use chromiumoxide::cdp::browser_protocol::target::TargetId;
 use futures::StreamExt;
 use manifest::{ElementBounds, Point2D, Viewport};
 
@@ -10,9 +11,11 @@ use crate::error::CliError;
 
 /// Wrapper around a CDP browser instance.
 pub struct Browser {
-    _browser: Arc<CdpBrowser>,
+    browser: Arc<CdpBrowser>,
     _handle: tokio::task::JoinHandle<()>,
-    page: Arc<Page>,
+    // Swappable so the recorder can follow links that open a new tab
+    // (target="_blank") instead of staying on the abandoned page.
+    page: std::sync::Mutex<Arc<Page>>,
 }
 
 impl Browser {
@@ -90,10 +93,49 @@ impl Browser {
             .map_err(|e| CliError::Browser(format!("Failed to open page: {e}")))?;
 
         Ok(Self {
-            _browser: Arc::new(browser),
+            browser: Arc::new(browser),
             _handle: handle,
-            page: Arc::new(page),
+            page: std::sync::Mutex::new(Arc::new(page)),
         })
+    }
+
+    /// Target ids of all currently open pages. Snapshot these before an
+    /// action to detect tabs the action opens.
+    pub async fn page_ids(&self) -> Result<Vec<TargetId>, CliError> {
+        let pages = self
+            .browser
+            .pages()
+            .await
+            .map_err(|e| CliError::Browser(format!("Failed to list pages: {e}")))?;
+        Ok(pages.iter().map(|p| p.target_id().clone()).collect())
+    }
+
+    /// If the last action spawned a new tab (e.g. a target="_blank" link),
+    /// switch the active page to it so subsequent steps and screenshots
+    /// follow the user flow. `seen` is the page-id snapshot taken before the
+    /// action; only genuinely new tabs are adopted (restored session tabs or
+    /// the New Tab Page are ignored). Returns true if the active page changed.
+    pub async fn adopt_new_page(&self, seen: &[TargetId]) -> Result<bool, CliError> {
+        let pages = self
+            .browser
+            .pages()
+            .await
+            .map_err(|e| CliError::Browser(format!("Failed to list pages: {e}")))?;
+        let current_id = self.page().target_id().clone();
+        for page in pages {
+            let tid = page.target_id().clone();
+            if tid == current_id || seen.contains(&tid) {
+                continue;
+            }
+            if page.url().await.ok().flatten().as_deref() == Some("about:blank") {
+                continue;
+            }
+            page.wait_for_navigation().await.ok();
+            page.bring_to_front().await.ok();
+            *self.page.lock().unwrap() = Arc::new(page);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Set the preferred color scheme via CDP Emulation.
@@ -105,7 +147,7 @@ impl Browser {
         let params = SetEmulatedMediaParams::builder()
             .features(vec![feature])
             .build();
-        self.page
+        self.page()
             .execute(params)
             .await
             .map_err(|e| CliError::Browser(format!("Failed to set color scheme: {e}")))?;
@@ -114,11 +156,11 @@ impl Browser {
 
     /// Navigate to a URL and wait for the page to load.
     pub async fn navigate(&self, url: &str) -> Result<(), CliError> {
-        self.page
+        self.page()
             .goto(url)
             .await
             .map_err(|e| CliError::Browser(format!("Navigation failed: {e}")))?;
-        self.page
+        self.page()
             .wait_for_navigation()
             .await
             .map_err(|e| CliError::Browser(format!("Wait for navigation failed: {e}")))?;
@@ -133,7 +175,7 @@ impl Browser {
     /// Capture a viewport-only screenshot as WebP bytes.
     pub async fn screenshot(&self) -> Result<Vec<u8>, CliError> {
         let bytes = self
-            .page
+            .page()
             .screenshot(
                 chromiumoxide::page::ScreenshotParams::builder()
                     .format(CaptureScreenshotFormat::Webp)
@@ -148,7 +190,7 @@ impl Browser {
     /// Capture a viewport-only screenshot as WebP bytes with configurable quality.
     pub async fn screenshot_jpeg(&self, quality: u8) -> Result<Vec<u8>, CliError> {
         let bytes = self
-            .page
+            .page()
             .screenshot(
                 chromiumoxide::page::ScreenshotParams::builder()
                     .format(CaptureScreenshotFormat::Webp)
@@ -174,7 +216,7 @@ impl Browser {
             selector = serde_json::to_string(selector)?
         );
         let result = self
-            .page
+            .page()
             .evaluate(js)
             .await
             .map_err(|e| CliError::Browser(format!("getBoundingClientRect failed: {e}")))?;
@@ -209,7 +251,7 @@ impl Browser {
             selector = serde_json::to_string(selector)?
         );
         let result = self
-            .page
+            .page()
             .evaluate(js)
             .await
             .map_err(|e| CliError::Browser(format!("Failed to get element center: {e}")))?;
@@ -229,7 +271,7 @@ impl Browser {
 
     pub async fn set_scroll_position(&self, x: f64, y: f64) -> Result<(), CliError> {
         let js = format!("window.scrollTo({{ left: {x}, top: {y}, behavior: 'instant' }});");
-        self.page
+        self.page()
             .evaluate(js)
             .await
             .map_err(|e| CliError::Browser(format!("Failed to set scroll position: {e}")))?;
@@ -254,7 +296,7 @@ impl Browser {
             "#
         );
         let result = self
-            .page
+            .page()
             .evaluate(js)
             .await
             .map_err(|e| CliError::Browser(format!("Point click failed: {e}")))?;
@@ -268,8 +310,8 @@ impl Browser {
         }
     }
 
-    /// Get a reference to the underlying CDP page.
-    pub fn page(&self) -> &Page {
-        &self.page
+    /// Get a handle to the currently active CDP page.
+    pub fn page(&self) -> Arc<Page> {
+        self.page.lock().unwrap().clone()
     }
 }

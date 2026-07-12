@@ -25,6 +25,7 @@ pub async fn execute_action(
                 .selector
                 .as_deref()
                 .ok_or_else(|| CliError::Action("click action requires a selector".into()))?;
+            let pages_before = browser.page_ids().await.unwrap_or_default();
             if let Ok(el) = browser.page().find_element(selector).await {
                 el.click()
                     .await
@@ -41,6 +42,12 @@ pub async fn execute_action(
                 return Err(CliError::Action(format!(
                     "Element not found '{selector}' and no highlight bounds were available for fallback click"
                 )));
+            }
+            // Follow target="_blank" links: if the click opened a new tab,
+            // make it the active page so the flow continues there.
+            browser.wait_idle(400).await;
+            if browser.adopt_new_page(&pages_before).await.unwrap_or(false) {
+                tracing::info!("click opened a new tab; following it");
             }
         }
         "type" => {
