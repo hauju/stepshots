@@ -642,6 +642,111 @@ pub struct BundleManifest {
     pub steps: Vec<BundleManifestStep>,
 }
 
+// ---------------------------------------------------------------------------
+// Live guided-tour track
+//
+// A recorded flow already carries everything a live "light the way" tour needs:
+// each step's `selector`, `action`, `name`, highlight `callout`, and the
+// `target_text`/`target_aria` drift anchors. `BundleManifest::to_tour_track`
+// projects that onto the player's track schema, so ONE recording drives both a
+// screenshot demo AND a live guided walkthrough. Shared by the CLI's
+// `tour export` and the dashboard's hosted-tour endpoint.
+// ---------------------------------------------------------------------------
+
+/// How a live-tour step advances to the next. Serializes as `{ "type": "click" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum TourAdvance {
+    /// Advance when the user clicks inside the target element.
+    Click,
+    /// Advance when the user types a non-empty value into the target element.
+    Input,
+}
+
+impl TourAdvance {
+    /// Map a recorded action to how the live step advances. Only interactive
+    /// actions become tour steps; `navigate`/`wait`/etc. are setup and yield `None`.
+    pub fn from_action(action: &str) -> Option<Self> {
+        match action {
+            "click" => Some(Self::Click),
+            "type" => Some(Self::Input),
+            _ => None,
+        }
+    }
+
+    /// The player-facing advance kind string (`"click"` / `"input"`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Click => "click",
+            Self::Input => "input",
+        }
+    }
+}
+
+/// Resilient anchors the player falls back to when `selector` no longer matches
+/// the live DOM (UI drift). Captured from the target element at record time.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TourFallback {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aria: Option<String>,
+}
+
+impl TourFallback {
+    /// A fallback carrying no anchor at all — nothing worth serializing.
+    pub fn is_empty(&self) -> bool {
+        self.text.is_none() && self.aria.is_none()
+    }
+}
+
+/// One step of a live tour: spotlight `selector`, show `title`/`body`, advance on interaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TourStep {
+    pub selector: String,
+    pub title: String,
+    pub body: String,
+    pub advance: TourAdvance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<TourFallback>,
+}
+
+/// An ordered set of tour steps — the data contract consumed by the `@stepshots/tour` player.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TourTrack {
+    pub steps: Vec<TourStep>,
+}
+
+impl BundleManifest {
+    /// Project this recording into a live guided-tour track. A step is included
+    /// only if it carries a highlight callout AND an interactive (click/type)
+    /// action; setup steps (navigate/wait, or callout-less steps) are dropped —
+    /// the same convention that lets one recording serve both demo and tour.
+    pub fn to_tour_track(&self) -> TourTrack {
+        let steps = self
+            .steps
+            .iter()
+            .filter_map(|s| {
+                let body = s.highlights.as_ref()?.first()?.callout.clone()?;
+                let advance = TourAdvance::from_action(s.action.as_deref()?)?;
+                let selector = s.selector.clone()?;
+                let fallback = TourFallback {
+                    text: s.target_text.clone(),
+                    aria: s.target_aria.clone(),
+                };
+                Some(TourStep {
+                    selector,
+                    title: s.name.clone().unwrap_or_default(),
+                    body,
+                    advance,
+                    fallback: (!fallback.is_empty()).then_some(fallback),
+                })
+            })
+            .collect();
+        TourTrack { steps }
+    }
+}
+
 /// A single step entry in the bundle manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleManifestStep {
@@ -737,5 +842,98 @@ impl From<&BundleManifestStep> for StepConfig {
             popups: vec![],
             zoom_regions: vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod tour_track_tests {
+    use super::*;
+
+    /// A bundle with: a setup `wait` (no callout, dropped), a click with a
+    /// callout + text anchor, a callout-less click (dropped), and a `type` with
+    /// an aria anchor. Guards the projection contract shared by CLI + dashboard.
+    fn sample_manifest() -> BundleManifest {
+        let json = serde_json::json!({
+            "version": 1,
+            "viewport": { "width": 1440, "height": 900 },
+            "steps": [
+                { "file": "steps/0.webp", "action": "wait",
+                  "selector": "main", "name": "Wait" },
+                { "file": "steps/1.webp", "action": "click",
+                  "selector": "a[href$=\"/new\"]", "name": "Open",
+                  "targetText": "New project",
+                  "highlights": [{ "bounds": {"x":0,"y":0,"width":1,"height":1},
+                                   "callout": "Click here" }] },
+                { "file": "steps/2.webp", "action": "click",
+                  "selector": ".no-callout", "name": "Silent" },
+                { "file": "steps/3.webp", "action": "type",
+                  "selector": "#name", "name": "Name it",
+                  "targetAria": "Project name",
+                  "highlights": [{ "bounds": {"x":0,"y":0,"width":1,"height":1},
+                                   "callout": "Type a name" }] }
+            ]
+        });
+        serde_json::from_value(json).expect("valid manifest")
+    }
+
+    #[test]
+    fn projects_only_interactive_steps_with_callouts() {
+        let track = sample_manifest().to_tour_track();
+        assert_eq!(
+            track.steps.len(),
+            2,
+            "wait + callout-less click are dropped"
+        );
+        assert_eq!(track.steps[0].selector, "a[href$=\"/new\"]");
+        assert_eq!(track.steps[0].advance, TourAdvance::Click);
+        assert_eq!(track.steps[1].advance, TourAdvance::Input);
+    }
+
+    #[test]
+    fn carries_drift_fallback_anchors() {
+        let track = sample_manifest().to_tour_track();
+        // click step -> text anchor; type step -> aria anchor.
+        assert_eq!(
+            track.steps[0].fallback.as_ref().unwrap().text.as_deref(),
+            Some("New project")
+        );
+        assert!(track.steps[0].fallback.as_ref().unwrap().aria.is_none());
+        assert_eq!(
+            track.steps[1].fallback.as_ref().unwrap().aria.as_deref(),
+            Some("Project name")
+        );
+    }
+
+    #[test]
+    fn advance_serializes_as_typed_object() {
+        // The player expects `{ "type": "click" }` / `{ "type": "input" }`.
+        assert_eq!(
+            serde_json::to_value(TourAdvance::Click).unwrap(),
+            serde_json::json!({ "type": "click" })
+        );
+        assert_eq!(
+            serde_json::to_value(TourAdvance::Input).unwrap(),
+            serde_json::json!({ "type": "input" })
+        );
+    }
+
+    #[test]
+    fn empty_fallback_is_omitted() {
+        // A step with no target_text/target_aria must not emit a `fallback` key.
+        let json = serde_json::json!({
+            "version": 1,
+            "viewport": { "width": 800, "height": 600 },
+            "steps": [
+                { "file": "s.webp", "action": "click", "selector": "#go", "name": "Go",
+                  "highlights": [{ "bounds": {"x":0,"y":0,"width":1,"height":1},
+                                   "callout": "Go" }] }
+            ]
+        });
+        let manifest: BundleManifest = serde_json::from_value(json).unwrap();
+        let step_json = serde_json::to_value(&manifest.to_tour_track().steps[0]).unwrap();
+        assert!(
+            step_json.get("fallback").is_none(),
+            "no anchors -> no fallback key"
+        );
     }
 }

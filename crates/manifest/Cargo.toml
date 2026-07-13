@@ -12,5 +12,8 @@ description = "Shared manifest types for Stepshots demo bundles"
 serde = { workspace = true }
 schemars = { version = "1", optional = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [features]
 schema = ["dep:schemars"]

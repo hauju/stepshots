@@ -11,8 +11,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;
-use manifest::BundleManifest;
-use serde::Serialize;
+use manifest::{BundleManifest, TourTrack};
 
 use crate::error::CliError;
 
@@ -25,53 +24,6 @@ pub enum TourFormat {
     Js,
 }
 
-#[derive(Serialize)]
-struct Advance {
-    #[serde(rename = "type")]
-    kind: &'static str,
-}
-
-/// Resilient anchors the player falls back to when `selector` no longer matches
-/// (UI drift). Captured at record time from the target element.
-#[derive(Serialize)]
-struct Fallback {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    aria: Option<String>,
-}
-
-impl Fallback {
-    fn is_empty(&self) -> bool {
-        self.text.is_none() && self.aria.is_none()
-    }
-}
-
-#[derive(Serialize)]
-struct TourStep {
-    selector: String,
-    title: String,
-    body: String,
-    advance: Advance,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fallback: Option<Fallback>,
-}
-
-#[derive(Serialize)]
-struct TourTrack {
-    steps: Vec<TourStep>,
-}
-
-/// Map a recorded action to how the live step advances. Only interactive actions
-/// become tour steps; `navigate`/`wait`/etc. are setup and are dropped.
-fn action_to_advance(action: &str) -> Option<&'static str> {
-    match action {
-        "click" => Some("click"),
-        "type" => Some("input"),
-        _ => None,
-    }
-}
-
 fn read_manifest(bundle: &Path) -> Result<BundleManifest, CliError> {
     let bytes = std::fs::read(bundle)?;
     let cursor = std::io::Cursor::new(bytes);
@@ -82,37 +34,6 @@ fn read_manifest(bundle: &Path) -> Result<BundleManifest, CliError> {
     let mut buf = Vec::new();
     entry.read_to_end(&mut buf)?;
     Ok(serde_json::from_slice(&buf)?)
-}
-
-/// Project the bundle onto the tour-track schema. A step is included only if it
-/// has a highlight callout AND an interactive action; setup steps are dropped —
-/// the same convention that lets one recording serve both demo and tour.
-fn project(manifest: &BundleManifest) -> TourTrack {
-    let steps = manifest
-        .steps
-        .iter()
-        .filter_map(|s| {
-            let body = s.highlights.as_ref()?.first()?.callout.clone()?;
-            let kind = action_to_advance(s.action.as_deref()?)?;
-            let selector = s.selector.clone()?;
-            let fallback = Fallback {
-                text: s.target_text.clone(),
-                aria: s.target_aria.clone(),
-            };
-            Some(TourStep {
-                selector,
-                title: s.name.clone().unwrap_or_default(),
-                body,
-                advance: Advance { kind },
-                fallback: if fallback.is_empty() {
-                    None
-                } else {
-                    Some(fallback)
-                },
-            })
-        })
-        .collect();
-    TourTrack { steps }
 }
 
 /// Export a tour track from `bundle` to `output` (default `<bundle>.tour.json`),
@@ -138,7 +59,7 @@ pub fn export(
     let out_path = output.unwrap_or_else(|| bundle.with_extension(default_ext));
 
     let manifest = read_manifest(bundle)?;
-    let track = project(&manifest);
+    let track = manifest.to_tour_track();
 
     if track.steps.is_empty() {
         return Err(CliError::Bundle(format!(
@@ -174,10 +95,18 @@ pub fn export(
             serde_json::to_string_pretty(&out).expect("serializing tour export output")
         );
     } else {
-        println!("Exported tour \"{key}\" ({step_count} steps) → {}", out_path.display());
+        println!(
+            "Exported tour \"{key}\" ({step_count} steps) → {}",
+            out_path.display()
+        );
         for track in registry.values() {
             for s in &track.steps {
-                println!("  - {:<5} {}  \"{}\"", s.advance.kind, s.selector, s.title);
+                println!(
+                    "  - {:<5} {}  \"{}\"",
+                    s.advance.as_str(),
+                    s.selector,
+                    s.title
+                );
             }
         }
     }
