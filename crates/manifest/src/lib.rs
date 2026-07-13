@@ -727,7 +727,14 @@ impl BundleManifest {
             .steps
             .iter()
             .filter_map(|s| {
-                let body = s.highlights.as_ref()?.first()?.callout.clone()?;
+                // First highlight that actually carries a callout — not just
+                // index 0, since the editor can add/reorder highlights and a
+                // decorative (callout-less) one may sit first.
+                let body = s
+                    .highlights
+                    .as_ref()?
+                    .iter()
+                    .find_map(|h| h.callout.clone())?;
                 let advance = TourAdvance::from_action(s.action.as_deref()?)?;
                 let selector = s.selector.clone()?;
                 let fallback = TourFallback {
@@ -935,5 +942,30 @@ mod tour_track_tests {
             step_json.get("fallback").is_none(),
             "no anchors -> no fallback key"
         );
+    }
+
+    #[test]
+    fn callout_read_from_first_captioned_highlight() {
+        // A decorative highlight (no callout) sits first; the captioned one is
+        // second. The step must still project, using the second's callout.
+        let json = serde_json::json!({
+            "version": 1,
+            "viewport": { "width": 800, "height": 600 },
+            "steps": [
+                { "file": "s.webp", "action": "click", "selector": "#go", "name": "Go",
+                  "highlights": [
+                    { "bounds": {"x":0,"y":0,"width":1,"height":1} },
+                    { "bounds": {"x":0,"y":0,"width":1,"height":1}, "callout": "Click go" }
+                  ] }
+            ]
+        });
+        let manifest: BundleManifest = serde_json::from_value(json).unwrap();
+        let track = manifest.to_tour_track();
+        assert_eq!(
+            track.steps.len(),
+            1,
+            "step with a captioned highlight is kept"
+        );
+        assert_eq!(track.steps[0].body, "Click go");
     }
 }
