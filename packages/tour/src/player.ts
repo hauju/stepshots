@@ -14,9 +14,35 @@ function isVisible(el: HTMLElement): boolean {
   return r.width > 0 && r.height > 0;
 }
 
+// Selectors come from recorded (possibly stale or hand-authored) data, so a
+// malformed one must never throw out of an event handler or animation frame —
+// it would fire on every click/keystroke of the host page. These swallow
+// `SyntaxError` and let the caller fall through to the text/aria fallback.
+function safeQueryAll(selector: string): ArrayLike<HTMLElement> {
+  try {
+    return document.querySelectorAll<HTMLElement>(selector);
+  } catch {
+    return [];
+  }
+}
+function safeClosest(target: Element, selector: string): boolean {
+  try {
+    return !!target.closest(selector);
+  } catch {
+    return false;
+  }
+}
+function safeMatches(target: Element, selector: string): boolean {
+  try {
+    return !!target.matches?.(selector);
+  } catch {
+    return false;
+  }
+}
+
 /** Find the first element matching `selector` that is actually rendered (non-zero box). */
 function findVisible(selector: string): HTMLElement | null {
-  const els = document.querySelectorAll<HTMLElement>(selector);
+  const els = safeQueryAll(selector);
   for (let i = 0; i < els.length; i++) {
     if (isVisible(els[i])) return els[i];
   }
@@ -44,19 +70,20 @@ function findByFallback(fallback?: TourFallback): HTMLElement | null {
   }
 
   if (wantText) {
-    const candidates = document.querySelectorAll<HTMLElement>(
-      "a,button,[role='button'],[data-testid]",
-    );
-    let contains: HTMLElement | null = null;
+    const candidates = safeQueryAll("a,button,[role='button'],[data-testid]");
+    // Exact text wins. A substring ("contains") match is only trusted when it's
+    // unambiguous — otherwise "Save" would silently pick one of several buttons
+    // (or match "Save and exit"), advancing the tour on the wrong element.
+    const partial: HTMLElement[] = [];
     for (let i = 0; i < candidates.length; i++) {
       const el = candidates[i];
       if (!isVisible(el)) continue;
       const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (!text) continue;
       if (text === wantText) return el;
-      if (!contains && text.includes(wantText)) contains = el;
+      if (text.includes(wantText)) partial.push(el);
     }
-    if (contains) return contains;
+    if (partial.length === 1) return partial[0];
   }
   return null;
 }
@@ -71,6 +98,8 @@ interface Overlay {
   hide(): void;
   setText(title: string, body: string, idx: number, total: number): void;
   position(rect: DOMRect): void;
+  /** Show the card with no spotlight, centered — for the "lost the trail" recovery state. */
+  showCard(): void;
   destroy(): void;
 }
 
@@ -140,6 +169,15 @@ function createOverlay(opts: TourOptions): Overlay {
       card.style.left = left + "px";
       card.classList.add("show");
     },
+    showCard() {
+      // No anchor element — hide the spotlight and float the card near top-center
+      // so the recovery message is actually visible.
+      spot.classList.remove("show");
+      const w = card.offsetWidth || 300;
+      card.style.top = "24px";
+      card.style.left = Math.max(12, (window.innerWidth - w) / 2) + "px";
+      card.classList.add("show");
+    },
     destroy() {
       host.remove();
     },
@@ -157,7 +195,14 @@ function createOverlay(opts: TourOptions): Overlay {
  * Framework-agnostic: operates purely on the rendered DOM. Returns a handle whose
  * `stop()` tears everything down.
  */
+// One live tour at a time per bundle instance — a second startTour() (or a
+// duplicated embed) would stack overlays and double-advance.
+let tourActive = false;
+
 export function startTour(track: TourTrack, options: TourOptions = {}): TourHandle {
+  if (tourActive) return { stop() {} };
+  tourActive = true;
+
   const steps = track.steps;
   const waitTimeoutMs = options.waitTimeoutMs ?? 12000;
   const overlay = createOverlay(options);
@@ -168,11 +213,29 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   let activeEl: HTMLElement | null = null;
   let rafId: number | null = null;
   let waitTimer: ReturnType<typeof setTimeout> | null = null;
+  let observer: MutationObserver | null = null;
   let done = false;
 
+  // Cancel everything the CURRENT step owns — rAF loop, wait timer, and the
+  // wait-state MutationObserver — so nothing outlives its step (no leaked
+  // observers or zombie animation loops). Run on every transition and teardown.
+  function clearStep() {
+    if (rafId != null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (waitTimer) {
+      clearTimeout(waitTimer);
+      waitTimer = null;
+    }
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+  }
+
   function teardown() {
-    if (rafId) cancelAnimationFrame(rafId);
-    if (waitTimer) clearTimeout(waitTimer);
+    clearStep();
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("input", onInput, true);
     overlay.destroy();
@@ -181,6 +244,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   function finish(reason: "done" | "skip") {
     if (done) return;
     done = true;
+    tourActive = false;
     teardown();
     options.onComplete?.(reason);
   }
@@ -195,26 +259,30 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
 
   function hitsActive(target: Element | null): boolean {
     if (!target) return false;
-    if (active && target.closest(active.selector)) return true;
-    // Selector drifted: accept the element we actually spotlighted via fallback.
-    return !!activeEl && (activeEl === target || activeEl.contains(target));
+    // Prefer the element we actually spotlighted: advancing must require hitting
+    // THAT element, not any element a broad recorded selector happens to match.
+    if (activeEl) return activeEl === target || activeEl.contains(target);
+    // No spotlight resolved (recovery state) — best-effort selector match.
+    return !!active && safeClosest(target, active.selector);
   }
   function onClick(e: MouseEvent) {
     if (active?.advance.type === "click" && hitsActive(e.target as Element | null)) advance();
   }
   function onInput(e: Event) {
+    if (active?.advance.type !== "input") return;
     const target = e.target as HTMLInputElement | null;
-    if (
-      active?.advance.type === "input" &&
-      (target?.matches?.(active.selector) || (!!activeEl && activeEl === target)) &&
-      String(target?.value || "").trim().length > 0
-    )
+    if (!target || String(target.value || "").trim().length === 0) return;
+    if (activeEl) {
+      if (activeEl === target || activeEl.contains(target)) advance();
+    } else if (active && safeMatches(target, active.selector)) {
       advance();
+    }
   }
   document.addEventListener("click", onClick, true);
   document.addEventListener("input", onInput, true);
 
   function startStep() {
+    clearStep(); // stop the previous step's loop/observer/timer first
     active = steps[idx];
     activeEl = null;
     overlay.hide();
@@ -222,37 +290,35 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     const el = resolveTarget(active);
     if (el) return track_(el);
     // Not mounted yet (SPA nav / loading gate) — wait for it.
-    let stopped = false;
-    const observer = new MutationObserver(() => {
-      if (stopped) return;
+    observer = new MutationObserver(() => {
+      if (done) return;
       const found = resolveTarget(active!);
       if (found) {
-        stopped = true;
-        observer.disconnect();
-        if (waitTimer) clearTimeout(waitTimer);
+        clearStep();
         track_(found);
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
     waitTimer = setTimeout(() => {
-      if (stopped) return;
-      stopped = true;
-      observer.disconnect();
-      // Lost the trail: show a recovery card instead of a spotlight.
+      if (done) return;
+      clearStep();
+      // Lost the trail: show a VISIBLE recovery card (no spotlight to anchor to).
       overlay.setText(
         "Hmm, we lost the trail",
         "The next step didn't show up. You can keep going on your own.",
         idx,
         steps.length,
       );
+      overlay.showCard();
     }, waitTimeoutMs);
   }
 
   function track_(el: HTMLElement) {
     activeEl = el;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
-    if (rafId) cancelAnimationFrame(rafId);
+    if (rafId != null) cancelAnimationFrame(rafId);
     const loop = () => {
+      if (done) return; // don't reschedule after teardown
       // Re-resolve each frame so re-renders / detaches don't strand us.
       const cur = document.body.contains(el) ? el : resolveTarget(active!);
       if (!cur) {
