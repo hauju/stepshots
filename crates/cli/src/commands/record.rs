@@ -278,11 +278,21 @@ pub async fn record_tutorial(
             // action fires; for everything else we capture AFTER it settles.
             let mut scene_url = None;
             let mut overlays = ResolvedOverlays::default();
+            // Element identity (text/aria) captured for the live-tour resilient
+            // fallback anchor. Only for actions that target an element.
+            let ident_selector = match step.action.as_str() {
+                "click" | "type" | "select" | "hover" => step.selector.as_deref(),
+                _ => None,
+            };
+            let mut target_identity: (Option<String>, Option<String>) = (None, None);
             if capture_before_action {
                 scene_url = get_current_url(&browser).await;
                 overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
                 let png = browser.screenshot().await?;
                 screenshots.push(png);
+                if let Some(sel) = ident_selector {
+                    target_identity = browser.get_element_identity(sel).await.unwrap_or_default();
+                }
             }
 
             // Execute the action (may capture transition frames for scroll steps)
@@ -300,6 +310,9 @@ pub async fn record_tutorial(
                 overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
                 let png = browser.screenshot().await?;
                 screenshots.push(png);
+                if let Some(sel) = ident_selector {
+                    target_identity = browser.get_element_identity(sel).await.unwrap_or_default();
+                }
             }
 
             let ResolvedOverlays {
@@ -342,6 +355,8 @@ pub async fn record_tutorial(
                 target_url: step.url.clone(),
                 selector: step.selector.clone(),
                 selector_quality: step.selector_quality.clone(),
+                target_text: target_identity.0,
+                target_aria: target_identity.1,
                 highlights: step_highlight.map(|a| vec![a]),
                 blur_regions: if step_blurs.is_empty() {
                     None

@@ -1,4 +1,4 @@
-import type { TourHandle, TourOptions, TourStep, TourTrack } from "./types";
+import type { TourFallback, TourHandle, TourOptions, TourStep, TourTrack } from "./types";
 
 const DEFAULT_THEME = {
   accent: "#3b82f6",
@@ -8,14 +8,62 @@ const DEFAULT_THEME = {
   cardMuted: "#475569",
 };
 
+/** Is the element actually rendered (non-zero box)? */
+function isVisible(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
 /** Find the first element matching `selector` that is actually rendered (non-zero box). */
 function findVisible(selector: string): HTMLElement | null {
   const els = document.querySelectorAll<HTMLElement>(selector);
   for (let i = 0; i < els.length; i++) {
-    const r = els[i].getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) return els[i];
+    if (isVisible(els[i])) return els[i];
   }
   return null;
+}
+
+/**
+ * Recover a step's target by its recorded identity (aria-label / visible text)
+ * when the CSS selector no longer matches — the UI drifted since recording.
+ * aria-label is the strongest anchor and is tried first; text falls back to an
+ * exact match, then containment. Best-effort: returns null if nothing fits.
+ */
+function findByFallback(fallback?: TourFallback): HTMLElement | null {
+  if (!fallback) return null;
+  const wantAria = fallback.aria?.trim().toLowerCase();
+  const wantText = fallback.text?.trim().toLowerCase();
+  if (!wantAria && !wantText) return null;
+
+  if (wantAria) {
+    const els = document.querySelectorAll<HTMLElement>("[aria-label]");
+    for (let i = 0; i < els.length; i++) {
+      const aria = (els[i].getAttribute("aria-label") || "").trim().toLowerCase();
+      if (aria === wantAria && isVisible(els[i])) return els[i];
+    }
+  }
+
+  if (wantText) {
+    const candidates = document.querySelectorAll<HTMLElement>(
+      "a,button,[role='button'],[data-testid]",
+    );
+    let contains: HTMLElement | null = null;
+    for (let i = 0; i < candidates.length; i++) {
+      const el = candidates[i];
+      if (!isVisible(el)) continue;
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      if (!text) continue;
+      if (text === wantText) return el;
+      if (!contains && text.includes(wantText)) contains = el;
+    }
+    if (contains) return contains;
+  }
+  return null;
+}
+
+/** Resolve a step's live target: CSS selector first, recorded identity as fallback. */
+function resolveTarget(step: TourStep): HTMLElement | null {
+  return findVisible(step.selector) ?? findByFallback(step.fallback);
 }
 
 interface Overlay {
@@ -115,6 +163,9 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   const overlay = createOverlay(options);
   let idx = 0;
   let active: TourStep | null = null;
+  // The element currently spotlighted (via selector OR fallback). Lets advance
+  // detection work even when the step's CSS selector no longer matches.
+  let activeEl: HTMLElement | null = null;
   let rafId: number | null = null;
   let waitTimer: ReturnType<typeof setTimeout> | null = null;
   let done = false;
@@ -142,17 +193,21 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     startStep();
   }
 
+  function hitsActive(target: Element | null): boolean {
+    if (!target) return false;
+    if (active && target.closest(active.selector)) return true;
+    // Selector drifted: accept the element we actually spotlighted via fallback.
+    return !!activeEl && (activeEl === target || activeEl.contains(target));
+  }
   function onClick(e: MouseEvent) {
-    const target = e.target as Element | null;
-    if (active && active.advance.type === "click" && target?.closest(active.selector)) advance();
+    if (active?.advance.type === "click" && hitsActive(e.target as Element | null)) advance();
   }
   function onInput(e: Event) {
     const target = e.target as HTMLInputElement | null;
     if (
-      active &&
-      active.advance.type === "input" &&
-      target?.matches?.(active.selector) &&
-      String(target.value || "").trim().length > 0
+      active?.advance.type === "input" &&
+      (target?.matches?.(active.selector) || (!!activeEl && activeEl === target)) &&
+      String(target?.value || "").trim().length > 0
     )
       advance();
   }
@@ -161,15 +216,16 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
 
   function startStep() {
     active = steps[idx];
+    activeEl = null;
     overlay.hide();
     overlay.setText(active.title, active.body, idx, steps.length);
-    const el = findVisible(active.selector);
+    const el = resolveTarget(active);
     if (el) return track_(el);
     // Not mounted yet (SPA nav / loading gate) — wait for it.
     let stopped = false;
     const observer = new MutationObserver(() => {
       if (stopped) return;
-      const found = findVisible(active!.selector);
+      const found = resolveTarget(active!);
       if (found) {
         stopped = true;
         observer.disconnect();
@@ -193,15 +249,18 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   }
 
   function track_(el: HTMLElement) {
+    activeEl = el;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
     if (rafId) cancelAnimationFrame(rafId);
     const loop = () => {
       // Re-resolve each frame so re-renders / detaches don't strand us.
-      const cur = document.body.contains(el) ? el : findVisible(active!.selector);
+      const cur = document.body.contains(el) ? el : resolveTarget(active!);
       if (!cur) {
+        activeEl = null;
         overlay.hide();
       } else {
         el = cur;
+        activeEl = cur;
         const r = el.getBoundingClientRect();
         if (r.width > 0 && r.height > 0) overlay.position(r);
       }

@@ -9,6 +9,17 @@ export type Advance =
   /** Advance when the user types a non-empty value into the target element. */
   | { type: "input" };
 
+/**
+ * Resilient anchors used when `selector` no longer matches the live DOM (UI
+ * drift since the recording). Captured from the target element at record time.
+ */
+export interface TourFallback {
+  /** Trimmed text content of the target at record time. */
+  text?: string;
+  /** aria-label of the target at record time. */
+  aria?: string;
+}
+
 /** One step of a live tour: anchor to `selector`, show `title`/`body`, advance on interaction. */
 export interface TourStep {
   /** CSS selector of the element to spotlight (re-resolved against the live DOM). */
@@ -19,6 +30,8 @@ export interface TourStep {
   body: string;
   /** How the user advances past this step. */
   advance: Advance;
+  /** Text/aria anchors the player falls back to when `selector` misses. */
+  fallback?: TourFallback;
 }
 
 /** An ordered set of steps. Produced from a Stepshots recording, or hand-authored. */
@@ -55,6 +68,20 @@ export interface TourHandle {
   stop(): void;
 }
 
+/**
+ * Auto-start a tour the first time a user reaches a given state — e.g. an empty
+ * "no projects yet" screen — and never again. The app renders `marker` only in
+ * that state; the player watches for it, starts the tour once, and remembers.
+ */
+export interface FirstRunTrigger {
+  /** Track key to auto-start. */
+  key: string;
+  /** CSS selector whose appearance signals first-run (watched until it mounts). */
+  marker: string;
+  /** localStorage key recording that the tour was shown, so it never auto-starts again (default: `stepshots_tour_seen:<key>`). */
+  seenKey?: string;
+}
+
 /** Options for the `<script>`-embed convenience. See `autoBoot`. */
 export interface AutoBootOptions extends TourOptions {
   /** Registry of named tracks. Defaults to `window.__STEPSHOTS_TOURS`. */
@@ -63,4 +90,6 @@ export interface AutoBootOptions extends TourOptions {
   param?: string;
   /** sessionStorage key used to keep a tour alive across SPA navigations that drop the query string (default: "stepshots_active_tour"). */
   storageKey?: string;
+  /** Auto-start a tour once, the first time a state (marker) appears. See {@link FirstRunTrigger}. */
+  firstRun?: FirstRunTrigger;
 }

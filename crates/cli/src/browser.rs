@@ -237,6 +237,42 @@ impl Browser {
         }
     }
 
+    /// Capture the target element's text + aria-label, for use as a resilient
+    /// fallback anchor when the CSS selector later drifts. Returns `(text, aria)`;
+    /// both `None` if the element isn't found.
+    pub async fn get_element_identity(
+        &self,
+        selector: &str,
+    ) -> Result<(Option<String>, Option<String>), CliError> {
+        let js = format!(
+            r#"
+            (() => {{
+                const el = document.querySelector({selector});
+                if (!el) return null;
+                const raw = (el.textContent || "").replace(/\s+/g, " ").trim();
+                const text = raw ? raw.slice(0, 120) : null;
+                const aria = el.getAttribute("aria-label") || null;
+                return {{ text, aria }};
+            }})()
+            "#,
+            selector = serde_json::to_string(selector)?
+        );
+        let result = self
+            .page()
+            .evaluate(js)
+            .await
+            .map_err(|e| CliError::Browser(format!("element identity capture failed: {e}")))?;
+        let value = result.into_value::<serde_json::Value>().ok();
+        match value {
+            Some(serde_json::Value::Object(obj)) => {
+                let text = obj.get("text").and_then(|v| v.as_str()).map(str::to_string);
+                let aria = obj.get("aria").and_then(|v| v.as_str()).map(str::to_string);
+                Ok((text, aria))
+            }
+            _ => Ok((None, None)),
+        }
+    }
+
     /// Get the center point of an element by CSS selector.
     pub async fn get_element_center(&self, selector: &str) -> Result<Option<Point2D>, CliError> {
         let js = format!(

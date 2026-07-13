@@ -663,6 +663,16 @@ pub struct BundleManifestStep {
     #[serde(alias = "selectorQuality")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector_quality: Option<String>,
+    /// Trimmed text content of the target element at record time. A resilient
+    /// fallback anchor for the live-tour player when the CSS selector no longer
+    /// matches (UI drift). Captured only for element-targeting actions.
+    #[serde(alias = "targetText")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_text: Option<String>,
+    /// aria-label of the target element at record time (fallback anchor).
+    #[serde(alias = "targetAria")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_aria: Option<String>,
     #[serde(alias = "annotations")]
     #[serde(default)]
     pub highlights: Option<Vec<HighlightEntry>>,

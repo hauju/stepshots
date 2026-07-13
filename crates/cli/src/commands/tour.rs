@@ -31,12 +31,30 @@ struct Advance {
     kind: &'static str,
 }
 
+/// Resilient anchors the player falls back to when `selector` no longer matches
+/// (UI drift). Captured at record time from the target element.
+#[derive(Serialize)]
+struct Fallback {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aria: Option<String>,
+}
+
+impl Fallback {
+    fn is_empty(&self) -> bool {
+        self.text.is_none() && self.aria.is_none()
+    }
+}
+
 #[derive(Serialize)]
 struct TourStep {
     selector: String,
     title: String,
     body: String,
     advance: Advance,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallback: Option<Fallback>,
 }
 
 #[derive(Serialize)]
@@ -77,11 +95,20 @@ fn project(manifest: &BundleManifest) -> TourTrack {
             let body = s.highlights.as_ref()?.first()?.callout.clone()?;
             let kind = action_to_advance(s.action.as_deref()?)?;
             let selector = s.selector.clone()?;
+            let fallback = Fallback {
+                text: s.target_text.clone(),
+                aria: s.target_aria.clone(),
+            };
             Some(TourStep {
                 selector,
                 title: s.name.clone().unwrap_or_default(),
                 body,
                 advance: Advance { kind },
+                fallback: if fallback.is_empty() {
+                    None
+                } else {
+                    Some(fallback)
+                },
             })
         })
         .collect();
