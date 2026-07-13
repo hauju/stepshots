@@ -108,8 +108,11 @@ For CI or scripts, set `STEPSHOTS_TOKEN` instead of logging in (generate one fro
 ### Upload to Stepshots
 
 ```sh
-# Upload a recorded bundle
+# Upload a recorded bundle (private draft)
 stepshots upload output/my-tutorial.stepshot
+
+# Publish it immediately (great for CI pipelines)
+stepshots upload output/my-tutorial.stepshot --public
 
 # Replace an existing demo
 stepshots upload output/my-tutorial.stepshot --demo-id <DEMO_ID>
@@ -118,7 +121,7 @@ stepshots upload output/my-tutorial.stepshot --demo-id <DEMO_ID>
 stepshots upload output/my-tutorial.stepshot --server https://your-instance.com
 ```
 
-Uploads use your `stepshots login` session, or `STEPSHOTS_TOKEN` / `--token` when set. Override the server with `--server` or `STEPSHOTS_SERVER`.
+Uploads use your `stepshots login` session, or `STEPSHOTS_TOKEN` / `--token` when set. Override the server with `--server` or `STEPSHOTS_SERVER`. Add `--public` to make new demos publicly viewable right away (ignored with `--demo-id`).
 
 ### Check your setup
 
