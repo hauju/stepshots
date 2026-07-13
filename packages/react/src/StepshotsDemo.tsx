@@ -15,7 +15,7 @@ export interface StepshotsDemoProps {
 
 export function StepshotsDemo({
   demoId,
-  baseUrl = "https://app.stepshots.com",
+  baseUrl = "https://stepshots.com",
   autoplay,
   theme,
   start,

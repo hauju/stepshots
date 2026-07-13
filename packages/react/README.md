@@ -23,7 +23,7 @@ function App() {
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `demoId` | `string` | **required** | The ID of the demo to embed |
-| `baseUrl` | `string` | `"https://app.stepshots.com"` | Base URL of the Stepshots app |
+| `baseUrl` | `string` | `"https://stepshots.com"` | Base URL of the Stepshots app |
 | `autoplay` | `boolean` | `false` | Auto-play the demo on load |
 | `theme` | `"light" \| "dark"` | — | Force a color theme |
 | `start` | `number` | — | Start at a specific step (1-indexed) |
