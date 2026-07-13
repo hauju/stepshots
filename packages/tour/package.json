@@ -1,0 +1,34 @@
+{
+  "name": "@stepshots/tour",
+  "version": "0.1.0",
+  "description": "Framework-agnostic live guided-tour player for Stepshots recordings — spotlight the next element on your real app and light the way",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "unpkg": "dist/index.global.js",
+  "jsdelivr": "dist/index.global.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --minify --clean",
+    "dev": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --watch"
+  },
+  "keywords": ["stepshots", "product-tour", "onboarding", "walkthrough", "guided-tour"],
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hauju/stepshots",
+    "directory": "packages/tour"
+  }
+}

@@ -72,6 +72,11 @@ enum Commands {
     },
     /// Print the JSON Schema for stepshots.config.json
     Schema,
+    /// Work with live guided-tour tracks derived from recordings
+    Tour {
+        #[command(subcommand)]
+        command: TourCommands,
+    },
     /// Record tutorials into .stepshot bundles
     Record {
         /// Tutorials to record (by key). Records all if omitted.
@@ -220,6 +225,28 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum TourCommands {
+    /// Export a live guided-tour track (JSON) from a recorded .stepshot bundle,
+    /// for use with the @stepshots/tour player
+    Export {
+        /// Path to the .stepshot bundle
+        bundle: PathBuf,
+
+        /// Output file (default: <bundle>.tour.json)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+
+        /// Key to register the tour under (default: bundle filename stem)
+        #[arg(long)]
+        key: Option<String>,
+
+        /// Output format: json (registry) or js (assigns window.__STEPSHOTS_TOURS)
+        #[arg(long, value_enum, default_value = "json")]
+        format: commands::tour::TourFormat,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -274,6 +301,16 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Schema => {
             commands::schema::run()?;
         }
+        Commands::Tour { command } => match command {
+            TourCommands::Export {
+                bundle,
+                output,
+                key,
+                format,
+            } => {
+                commands::tour::export(&bundle, output, key, format, json)?;
+            }
+        },
         Commands::Record {
             tutorials,
             tutorial,
