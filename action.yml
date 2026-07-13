@@ -2,7 +2,7 @@ name: "Stepshots Record"
 description: "Record and verify interactive product demos with Stepshots CLI"
 branding:
   icon: "camera"
-  color: "purple"
+  color: "gray-dark"
 
 inputs:
   command:
