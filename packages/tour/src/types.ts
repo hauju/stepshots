@@ -53,6 +53,22 @@ export interface TourTheme {
   cardMuted?: string;
 }
 
+/**
+ * A tour lifecycle event, delivered to {@link TourOptions.onEvent}. Lets a host
+ * report anonymous progress (start → per-step → done/skip/lost) for analytics.
+ */
+export type TourEvent =
+  /** The tour began at step 0. Not emitted on a resume (a run continuing after a full page reload via {@link TourOptions.resumeKey}) — that fires only the resumed `step`. */
+  | { type: "start" }
+  /** A step became active (fires for every step, including step 0). */
+  | { type: "step"; index: number }
+  /** The user completed the last step. */
+  | { type: "done" }
+  /** The user dismissed the tour while step `index` was active. */
+  | { type: "skip"; index: number }
+  /** The recovery card was shown at step `index` (its target never appeared). */
+  | { type: "lost"; index: number };
+
 export interface TourOptions {
   theme?: TourTheme;
   /** Label for the dismiss control (default: "Skip tour"). */
@@ -61,6 +77,10 @@ export interface TourOptions {
   waitTimeoutMs?: number;
   /** Called when the tour ends. `done` = finished the last step; `skip` = user dismissed it. */
   onComplete?: (reason: "done" | "skip") => void;
+  /** Called at each tour lifecycle point (start / step / done / skip / lost) — for progress analytics. */
+  onEvent?: (event: TourEvent) => void;
+  /** sessionStorage key under which the player persists the current step index so a full page reload resumes mid-tour; cleared when the tour ends. */
+  resumeKey?: string;
 }
 
 /** Handle returned by `startTour` — call `stop()` to tear the tour down early. */

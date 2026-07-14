@@ -1,4 +1,4 @@
-import type { TourFallback, TourHandle, TourOptions, TourStep, TourTrack } from "./types";
+import type { TourEvent, TourFallback, TourHandle, TourOptions, TourStep, TourTrack } from "./types";
 
 const DEFAULT_THEME = {
   accent: "#3b82f6",
@@ -12,6 +12,11 @@ const DEFAULT_THEME = {
 function isVisible(el: HTMLElement): boolean {
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0;
+}
+
+/** Honor the OS "reduce motion" setting (guarded — matchMedia is absent in some test envs). */
+function reduceMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
 // Selectors come from recorded (possibly stale or hand-authored) data, so a
@@ -93,6 +98,26 @@ function resolveTarget(step: TourStep): HTMLElement | null {
   return findVisible(step.selector) ?? findByFallback(step.fallback);
 }
 
+// Resume persistence — sessionStorage can throw (disabled/quota) or be absent, so
+// every access is guarded. A missing/unparseable value reads as NaN (start fresh).
+function readResume(key: string): number {
+  try {
+    return parseInt(sessionStorage.getItem(key) ?? "", 10);
+  } catch {
+    return NaN;
+  }
+}
+function writeResume(key: string, idx: number) {
+  try {
+    sessionStorage.setItem(key, String(idx));
+  } catch {}
+}
+function clearResume(key: string) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {}
+}
+
 interface Overlay {
   onSkip: (() => void) | null;
   hide(): void;
@@ -123,9 +148,13 @@ function createOverlay(opts: TourOptions): Overlay {
     `.skip{background:none;border:0;color:${t.cardMuted};opacity:.8;font-size:12px;cursor:pointer;padding:0}` +
     ".skip:hover{opacity:1}" +
     ".show{opacity:1}" +
+    // Reduced-motion: drop the spotlight/card tweens for users who ask for it.
+    "@media (prefers-reduced-motion:reduce){.spot,.card{transition:none}}" +
     "</style>" +
     '<div class="spot" part="spot"></div>' +
-    '<div class="card"><h4></h4><p></p>' +
+    // role=dialog + aria-label names the callout; aria-live announces each step's
+    // text on setText. No aria-modal — the page stays interactive by design.
+    '<div class="card" role="dialog" aria-label="Guided tour" aria-live="polite" aria-atomic="true"><h4></h4><p></p>' +
     '<div class="row"><span class="step"></span>' +
     `<button class="skip" type="button">${opts.skipLabel ?? "Skip tour"}</button></div></div>`;
   document.body.appendChild(host);
@@ -206,7 +235,13 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   const steps = track.steps;
   const waitTimeoutMs = options.waitTimeoutMs ?? 12000;
   const overlay = createOverlay(options);
-  let idx = 0;
+  // Resume mid-tour after a full page reload: an in-range stored index (> 0) means
+  // the same run continues at that step. Anything else (missing/NaN/0/out of range
+  // — e.g. the track changed since) starts fresh at 0 and overwrites the stash.
+  const resumeKey = options.resumeKey;
+  const stored = resumeKey ? readResume(resumeKey) : NaN;
+  const resuming = Number.isInteger(stored) && stored > 0 && stored < steps.length;
+  let idx = resuming ? stored : 0;
   let active: TourStep | null = null;
   // The element currently spotlighted (via selector OR fallback). Lets advance
   // detection work even when the step's CSS selector no longer matches.
@@ -215,6 +250,14 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   let waitTimer: ReturnType<typeof setTimeout> | null = null;
   let observer: MutationObserver | null = null;
   let done = false;
+
+  // A throwing consumer callback must never break the player — the tour keeps
+  // running even if the host's analytics reporting fails.
+  function emit(event: TourEvent) {
+    try {
+      options.onEvent?.(event);
+    } catch {}
+  }
 
   // Cancel everything the CURRENT step owns — rAF loop, wait timer, and the
   // wait-state MutationObserver — so nothing outlives its step (no leaked
@@ -238,6 +281,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     clearStep();
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("input", onInput, true);
+    document.removeEventListener("keydown", onKey, true);
     overlay.destroy();
   }
 
@@ -246,6 +290,8 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     done = true;
     tourActive = false;
     teardown();
+    if (resumeKey) clearResume(resumeKey); // the run ended — don't resume it next load
+    emit(reason === "done" ? { type: "done" } : { type: "skip", index: idx });
     options.onComplete?.(reason);
   }
 
@@ -278,13 +324,21 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
       advance();
     }
   }
+  function onKey(e: KeyboardEvent) {
+    // Esc dismisses like Skip. Don't preventDefault/stopPropagation — the host
+    // page may also react to Esc and that's fine.
+    if (e.key === "Escape") finish("skip");
+  }
   document.addEventListener("click", onClick, true);
   document.addEventListener("input", onInput, true);
+  document.addEventListener("keydown", onKey, true);
 
   function startStep() {
     clearStep(); // stop the previous step's loop/observer/timer first
     active = steps[idx];
     activeEl = null;
+    if (resumeKey) writeResume(resumeKey, idx); // so a reload re-enters at this step
+    emit({ type: "step", index: idx });
     overlay.hide();
     overlay.setText(active.title, active.body, idx, steps.length);
     const el = resolveTarget(active);
@@ -302,6 +356,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     waitTimer = setTimeout(() => {
       if (done) return;
       clearStep();
+      emit({ type: "lost", index: idx });
       // Lost the trail: show a VISIBLE recovery card (no spotlight to anchor to).
       overlay.setText(
         "Hmm, we lost the trail",
@@ -315,7 +370,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
 
   function track_(el: HTMLElement) {
     activeEl = el;
-    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.scrollIntoView({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
     if (rafId != null) cancelAnimationFrame(rafId);
     const loop = () => {
       if (done) return; // don't reschedule after teardown
@@ -335,6 +390,8 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     loop();
   }
 
+  // A resume is the same run continuing, so it emits only its step, not "start".
+  if (!resuming) emit({ type: "start" });
   startStep();
   return { stop: () => finish("skip") };
 }

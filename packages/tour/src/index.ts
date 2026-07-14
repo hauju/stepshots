@@ -3,6 +3,7 @@ export { autoBoot } from "./autoboot";
 export type {
   Advance,
   AutoBootOptions,
+  TourEvent,
   TourHandle,
   TourOptions,
   TourStep,
