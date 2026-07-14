@@ -147,6 +147,9 @@ function createOverlay(opts: TourOptions): Overlay {
     `.step{font-size:11px;color:${t.cardMuted};opacity:.8;letter-spacing:.04em}` +
     `.skip{background:none;border:0;color:${t.cardMuted};opacity:.8;font-size:12px;cursor:pointer;padding:0}` +
     ".skip:hover{opacity:1}" +
+    // Attribution badge: a muted, low-opacity footer link (set only when opts.badge is present).
+    `.badge{display:block;margin-top:10px;font-size:10px;color:${t.cardMuted};opacity:.55;text-decoration:none;letter-spacing:.02em}` +
+    ".badge:hover{opacity:1;text-decoration:underline}" +
     ".show{opacity:1}" +
     // Reduced-motion: drop the spotlight/card tweens for users who ask for it.
     "@media (prefers-reduced-motion:reduce){.spot,.card{transition:none}}" +
@@ -164,6 +167,21 @@ function createOverlay(opts: TourOptions): Overlay {
   const h4 = root.querySelector<HTMLElement>("h4")!;
   const p = root.querySelector<HTMLElement>("p")!;
   const stepLabel = root.querySelector<HTMLElement>(".step")!;
+
+  // Optional attribution link in the card footer. Rendered only when the host
+  // opts in, and always via DOM APIs (textContent/href) — never innerHTML — so an
+  // arbitrary label/href can't inject markup. Lives inside the card (pointer-
+  // events:auto) and outside the step row, so it doesn't affect advance detection.
+  if (opts.badge) {
+    const badge = document.createElement("a");
+    badge.className = "badge";
+    badge.setAttribute("part", "badge");
+    badge.textContent = opts.badge.label;
+    badge.href = opts.badge.href;
+    badge.target = "_blank";
+    badge.rel = "noopener noreferrer";
+    card.appendChild(badge);
+  }
 
   const overlay: Overlay = {
     onSkip: null,

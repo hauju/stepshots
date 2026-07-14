@@ -308,6 +308,29 @@ await scenario("resume (4) out-of-range stored index starts fresh", async () => 
 
 // ---------------------------------------------------------------------------
 
+await scenario("attribution badge — present with the badge option, absent without it", async () => {
+  // With `badge`: a muted attribution anchor is rendered in the callout card.
+  const withBadge = loadPage();
+  withBadge.StepshotsTour.startTour(twoStep, {
+    badge: { label: "Powered by Stepshots", href: "https://stepshots.com/?ref=tour-badge" },
+  });
+  const cardWith = withBadge.document.querySelector("[data-stepshots-tour]").shadowRoot.querySelector(".card");
+  const a = cardWith.querySelector("a");
+  check(!!a && a.tagName === "A", "an anchor is rendered in the card when badge is set");
+  check(a.textContent === "Powered by Stepshots", "badge anchor uses the provided label");
+  check(a.getAttribute("href") === "https://stepshots.com/?ref=tour-badge", "badge anchor uses the provided href");
+  check(a.getAttribute("target") === "_blank", 'badge anchor sets target="_blank"');
+  check(a.getAttribute("rel") === "noopener noreferrer", 'badge anchor sets rel="noopener noreferrer"');
+
+  // Without `badge`: no anchor exists in the card at all.
+  const noBadge = loadPage();
+  noBadge.StepshotsTour.startTour(twoStep, {});
+  const cardWithout = noBadge.document.querySelector("[data-stepshots-tour]").shadowRoot.querySelector(".card");
+  check(cardWithout.querySelector("a") === null, "no anchor is rendered in the card when badge is omitted");
+});
+
+// ---------------------------------------------------------------------------
+
 console.log(`\n${"-".repeat(48)}`);
 if (failures.length) {
   console.error(`FAILED: ${failures.length} assertion(s), ${passed} passed`);

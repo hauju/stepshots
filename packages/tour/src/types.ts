@@ -83,6 +83,8 @@ export interface TourOptions {
   onEvent?: (event: TourEvent) => void;
   /** sessionStorage key under which the player persists the current step index so a full page reload resumes mid-tour; cleared when the tour ends. */
   resumeKey?: string;
+  /** When set, renders a small attribution link (label → href) in the callout card footer. Neutral: the host decides the text and destination; the player carries no branding of its own. */
+  badge?: { label: string; href: string };
 }
 
 /** Handle returned by `startTour` — call `stop()` to tear the tour down early. */
