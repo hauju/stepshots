@@ -490,6 +490,18 @@ pub struct ElementBounds {
     pub z_index: Option<u32>,
 }
 
+impl ElementBounds {
+    /// True when this rect and `other` share a positive-area overlap.
+    /// Axis-aligned; edges that merely touch (zero-area contact) count as
+    /// non-intersecting.
+    pub fn intersects(&self, other: &ElementBounds) -> bool {
+        self.x < other.x + other.width
+            && other.x < self.x + self.width
+            && self.y < other.y + other.height
+            && other.y < self.y + self.height
+    }
+}
+
 /// A 2D point in viewport coordinates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Point2D {
@@ -730,23 +742,41 @@ impl BundleManifest {
                 // First highlight that actually carries a callout — not just
                 // index 0, since the editor can add/reorder highlights and a
                 // decorative (callout-less) one may sit first.
-                let body = s
+                let callout_highlight = s
                     .highlights
                     .as_ref()?
                     .iter()
-                    .find_map(|h| h.callout.clone())?;
+                    .find(|h| h.callout.is_some())?;
+                let body = callout_highlight.callout.clone()?;
                 let advance = TourAdvance::from_action(s.action.as_deref()?)?;
                 let selector = s.selector.clone()?;
-                let fallback = TourFallback {
-                    text: s.target_text.clone(),
-                    aria: s.target_aria.clone(),
+                // Owners redact sensitive areas with blur regions, which the
+                // dashboard bakes into the served screenshot. If any blur covers
+                // the callout-bearing highlight, the element's record-time text
+                // must not resurface as plaintext here — drop the fallback
+                // anchors so the public tour JSON stays redacted too. Degenerate
+                // (zero-area) blur regions redact nothing and are ignored.
+                let blurred = s.blur_regions.as_ref().is_some_and(|regions| {
+                    regions
+                        .iter()
+                        .filter(|r| r.width > 0.0 && r.height > 0.0)
+                        .any(|r| r.intersects(&callout_highlight.bounds))
+                });
+                let fallback = if blurred {
+                    None
+                } else {
+                    let fallback = TourFallback {
+                        text: s.target_text.clone(),
+                        aria: s.target_aria.clone(),
+                    };
+                    (!fallback.is_empty()).then_some(fallback)
                 };
                 Some(TourStep {
                     selector,
                     title: s.name.clone().unwrap_or_default(),
                     body,
                     advance,
-                    fallback: (!fallback.is_empty()).then_some(fallback),
+                    fallback,
                 })
             })
             .collect();
@@ -967,5 +997,87 @@ mod tour_track_tests {
             "step with a captioned highlight is kept"
         );
         assert_eq!(track.steps[0].body, "Click go");
+    }
+
+    /// One click step whose callout highlight sits at (100,100)-(150,120),
+    /// carrying both drift anchors and a caller-supplied blur region.
+    fn manifest_with_blur(blur: serde_json::Value) -> BundleManifest {
+        let json = serde_json::json!({
+            "version": 1,
+            "viewport": { "width": 800, "height": 600 },
+            "steps": [
+                { "file": "s.webp", "action": "click", "selector": "#go", "name": "Go",
+                  "targetText": "Secret name", "targetAria": "Secret field",
+                  "highlights": [{ "bounds": {"x":100,"y":100,"width":50,"height":20},
+                                   "callout": "Click go" }],
+                  "blur_regions": blur }
+            ]
+        });
+        serde_json::from_value(json).expect("valid manifest")
+    }
+
+    #[test]
+    fn blur_over_callout_highlight_omits_fallback() {
+        // Blur sits squarely inside the callout highlight -> record-time text of
+        // that element must not resurface as a plaintext fallback.
+        let track = manifest_with_blur(
+            serde_json::json!([{ "x": 110, "y": 105, "width": 30, "height": 10 }]),
+        )
+        .to_tour_track();
+        assert_eq!(track.steps.len(), 1);
+        assert!(
+            track.steps[0].fallback.is_none(),
+            "blur covering the callout highlight redacts the fallback anchors"
+        );
+    }
+
+    #[test]
+    fn blur_elsewhere_keeps_fallback() {
+        // Blur is far from the callout highlight -> anchors are preserved.
+        let track =
+            manifest_with_blur(serde_json::json!([{ "x": 0, "y": 0, "width": 10, "height": 10 }]))
+                .to_tour_track();
+        assert_eq!(track.steps.len(), 1);
+        let fallback = track.steps[0]
+            .fallback
+            .as_ref()
+            .expect("non-overlapping blur leaves fallback intact");
+        assert_eq!(fallback.text.as_deref(), Some("Secret name"));
+        assert_eq!(fallback.aria.as_deref(), Some("Secret field"));
+    }
+
+    #[test]
+    fn blur_over_callout_without_anchors_is_unchanged() {
+        // A blur intersects the callout highlight, but the step never carried
+        // drift anchors — projection is unaffected (no fallback either way).
+        let json = serde_json::json!({
+            "version": 1,
+            "viewport": { "width": 800, "height": 600 },
+            "steps": [
+                { "file": "s.webp", "action": "click", "selector": "#go", "name": "Go",
+                  "highlights": [{ "bounds": {"x":100,"y":100,"width":50,"height":20},
+                                   "callout": "Click go" }],
+                  "blur_regions": [{ "x": 110, "y": 105, "width": 30, "height": 10 }] }
+            ]
+        });
+        let manifest: BundleManifest = serde_json::from_value(json).unwrap();
+        let track = manifest.to_tour_track();
+        assert_eq!(track.steps.len(), 1, "step still projects");
+        assert_eq!(track.steps[0].body, "Click go");
+        assert!(track.steps[0].fallback.is_none());
+    }
+
+    #[test]
+    fn blurred_fallback_absent_from_serialized_json() {
+        // The redacted fallback must not appear as a `fallback` key on the wire.
+        let track = manifest_with_blur(
+            serde_json::json!([{ "x": 110, "y": 105, "width": 30, "height": 10 }]),
+        )
+        .to_tour_track();
+        let step_json = serde_json::to_value(&track.steps[0]).unwrap();
+        assert!(
+            step_json.get("fallback").is_none(),
+            "blurred anchors -> no fallback key in JSON"
+        );
     }
 }
