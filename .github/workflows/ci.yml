@@ -29,3 +29,21 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  tour:
+    name: Tour player (JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        working-directory: packages/tour
+        run: bun install
+
+      - name: Build + test
+        working-directory: packages/tour
+        run: bun run test

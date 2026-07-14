@@ -18,10 +18,12 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --minify --clean",
-    "dev": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --watch"
+    "dev": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --watch",
+    "test": "bun run build && node test/tour.test.mjs"
   },
   "keywords": ["stepshots", "product-tour", "onboarding", "walkthrough", "guided-tour"],
   "devDependencies": {
+    "jsdom": "^29.1.1",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },
