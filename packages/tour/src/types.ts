@@ -7,7 +7,9 @@ export type Advance =
   /** Advance when the user clicks inside the target element. */
   | { type: "click" }
   /** Advance when the user types a non-empty value into the target element. */
-  | { type: "input" };
+  | { type: "input" }
+  /** Advance when the user changes the target's value, e.g. picks a dropdown option. */
+  | { type: "change" };
 
 /**
  * Resilient anchors used when `selector` no longer matches the live DOM (UI

@@ -21,6 +21,7 @@ const iife = readFileSync(resolve(here, "../dist/index.global.js"), "utf8");
 const fixture = `<!doctype html><html><body>
   <button id="btn1">Create project</button>
   <input id="field1" />
+  <select id="plan1"><option value="">--</option><option value="pro">Pro</option></select>
 </body></html>`;
 
 /**
@@ -169,6 +170,31 @@ await scenario("event emission order — skip carries the active index", async (
   window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   check(events.at(-1) === "skip:1", "skip event reports the index of the active step (1)");
   check(events.join(",") === "start,step:0,step:1,skip:1", "skip run emits start, step:0, step:1, skip:1");
+});
+
+// ---------------------------------------------------------------------------
+
+await scenario("change-advance: a select step advances on the change event", async () => {
+  const window = loadPage();
+  const events = [];
+  const selectTrack = {
+    steps: [
+      { selector: "#plan1", title: "Pick a plan", body: "Choose one.", advance: { type: "change" } },
+      { selector: "#field1", title: "Name it", body: "Type something.", advance: { type: "input" } },
+    ],
+  };
+  window.StepshotsTour.startTour(selectTrack, { onEvent: (e) => events.push(eventTag(e)) });
+  check(events.join(",") === "start,step:0", "start then step:0 emitted on launch");
+
+  // A change on an unrelated element must NOT advance the tour.
+  window.document.getElementById("field1").dispatchEvent(new window.Event("change", { bubbles: true }));
+  check(events.at(-1) === "step:0", "change on an unrelated element does not advance");
+
+  // A change on the spotlighted <select> advances (no emptiness check).
+  const select = window.document.getElementById("plan1");
+  select.value = "pro";
+  select.dispatchEvent(new window.Event("change", { bubbles: true }));
+  check(events.at(-1) === "step:1", "change on the spotlighted select advances to step:1");
 });
 
 // ---------------------------------------------------------------------------

@@ -281,6 +281,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     clearStep();
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("input", onInput, true);
+    document.removeEventListener("change", onChange, true);
     document.removeEventListener("keydown", onKey, true);
     overlay.destroy();
   }
@@ -324,6 +325,18 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
       advance();
     }
   }
+  function onChange(e: Event) {
+    // A `change` event means a committed value (e.g. a picked dropdown option),
+    // so there's no emptiness check like `input`.
+    if (active?.advance.type !== "change") return;
+    const target = e.target as Element | null;
+    if (!target) return;
+    if (activeEl) {
+      if (activeEl === target || activeEl.contains(target)) advance();
+    } else if (active && safeMatches(target, active.selector)) {
+      advance();
+    }
+  }
   function onKey(e: KeyboardEvent) {
     // Esc dismisses like Skip. Don't preventDefault/stopPropagation — the host
     // page may also react to Esc and that's fine.
@@ -331,6 +344,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   }
   document.addEventListener("click", onClick, true);
   document.addEventListener("input", onInput, true);
+  document.addEventListener("change", onChange, true);
   document.addEventListener("keydown", onKey, true);
 
   function startStep() {

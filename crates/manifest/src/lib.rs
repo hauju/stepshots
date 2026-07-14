@@ -673,6 +673,8 @@ pub enum TourAdvance {
     Click,
     /// Advance when the user types a non-empty value into the target element.
     Input,
+    /// Advance when the user changes the target's value (e.g. picks a dropdown option).
+    Change,
 }
 
 impl TourAdvance {
@@ -682,15 +684,17 @@ impl TourAdvance {
         match action {
             "click" => Some(Self::Click),
             "type" => Some(Self::Input),
+            "select" => Some(Self::Change),
             _ => None,
         }
     }
 
-    /// The player-facing advance kind string (`"click"` / `"input"`).
+    /// The player-facing advance kind string (`"click"` / `"input"` / `"change"`).
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Click => "click",
             Self::Input => "input",
+            Self::Change => "change",
         }
     }
 }
@@ -731,7 +735,7 @@ pub struct TourTrack {
 
 impl BundleManifest {
     /// Project this recording into a live guided-tour track. A step is included
-    /// only if it carries a highlight callout AND an interactive (click/type)
+    /// only if it carries a highlight callout AND an interactive (click/type/select)
     /// action; setup steps (navigate/wait, or callout-less steps) are dropped —
     /// the same convention that lets one recording serve both demo and tour.
     pub fn to_tour_track(&self) -> TourTrack {
@@ -952,6 +956,35 @@ mod tour_track_tests {
             serde_json::to_value(TourAdvance::Input).unwrap(),
             serde_json::json!({ "type": "input" })
         );
+        assert_eq!(
+            serde_json::to_value(TourAdvance::Change).unwrap(),
+            serde_json::json!({ "type": "change" })
+        );
+    }
+
+    #[test]
+    fn select_step_projects_with_change_advance() {
+        // A captioned `select` step becomes a tour step advancing on `change`;
+        // an uncaptioned select is dropped like any callout-less step.
+        let json = serde_json::json!({
+            "version": 1,
+            "viewport": { "width": 800, "height": 600 },
+            "steps": [
+                { "file": "s0.webp", "action": "select", "selector": "#plan", "name": "Pick a plan",
+                  "highlights": [{ "bounds": {"x":0,"y":0,"width":1,"height":1},
+                                   "callout": "Choose a plan" }] },
+                { "file": "s1.webp", "action": "select", "selector": "#silent", "name": "Silent" }
+            ]
+        });
+        let manifest: BundleManifest = serde_json::from_value(json).unwrap();
+        let track = manifest.to_tour_track();
+        assert_eq!(
+            track.steps.len(),
+            1,
+            "captioned select kept, uncaptioned select dropped"
+        );
+        assert_eq!(track.steps[0].advance, TourAdvance::Change);
+        assert_eq!(track.steps[0].body, "Choose a plan");
     }
 
     #[test]
