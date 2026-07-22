@@ -1,4 +1,4 @@
-import { startTour } from "./player";
+import { showIntro, startTour } from "./player";
 import type { AutoBootOptions, TourHandle, TourOptions, TourTrack } from "./types";
 
 declare global {
@@ -128,12 +128,23 @@ export function autoBoot(opts: AutoBootOptions = {}): TourHandle | null {
     if (!seen(seenKey)) {
       waitForSelector(fr.marker, () => {
         if (seen(seenKey)) return;
-        // Mark shown at start; sessionStorage resumes across a mid-tour reload.
+        // Mark at offer time — accepted, declined, or started, it never
+        // auto-offers again. sessionStorage resumes across a mid-tour reload.
         markSeen(seenKey);
-        try {
-          sessionStorage.setItem(storageKey, fr.key);
-        } catch {}
-        begin(tracks[fr.key], storageKey, resumeKey, opts);
+        const start = () => {
+          try {
+            sessionStorage.setItem(storageKey, fr.key);
+          } catch {}
+          begin(tracks[fr.key], storageKey, resumeKey, opts);
+        };
+        if (fr.intro) {
+          // Consent first: the tour only dims the screen if the user asks it to.
+          showIntro(fr.intro, opts, (accepted) => {
+            if (accepted) start();
+          });
+        } else {
+          start();
+        }
       });
     }
   }

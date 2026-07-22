@@ -436,6 +436,89 @@ await scenario("SPA nav away and back re-validates earlier input steps", async (
 });
 
 // ---------------------------------------------------------------------------
+// firstRun intro — the consent card autoBoot offers before auto-starting a tour.
+
+await scenario("firstRun intro: consent card gates the auto-started tour", async () => {
+  const window = loadPage();
+  const events = [];
+  window.StepshotsTour.autoBoot({
+    tracks: { welcome: twoStep },
+    firstRun: {
+      key: "welcome",
+      marker: "#btn1",
+      intro: { title: "Welcome 👋", body: "Take a quick tour?", startLabel: "Let's go", dismissLabel: "Not now" },
+    },
+    onEvent: (e) => events.push(eventTag(e)),
+  });
+  await delay(); // autoBoot defers to DOMContentLoaded while jsdom is "loading"
+  const introHost = window.document.querySelector("[data-stepshots-intro]");
+  check(!!introHost, "intro card mounted when the marker is present");
+  const shadow = introHost.shadowRoot;
+  check(shadow.querySelector("h4").textContent === "Welcome 👋", "intro shows the provided title");
+  check(shadow.querySelector("p").textContent === "Take a quick tour?", "intro shows the provided body");
+  check(shadow.querySelector(".start").textContent === "Let's go", "start button uses the provided label");
+  check(shadow.querySelector(".dismiss").textContent === "Not now", "dismiss button uses the provided label");
+  check(shadow.querySelector(".card").getAttribute("role") === "dialog", 'intro card has role="dialog"');
+  check(window.document.querySelector("[data-stepshots-tour]") === null, "tour does NOT start while the intro is open");
+  check(window.localStorage.getItem("stepshots_tour_seen:welcome") === "1", "the offer itself marks the tour seen");
+  check(events.length === 0, "no tour events while the intro is open");
+
+  shadow.querySelector(".start").click();
+  check(window.document.querySelector("[data-stepshots-intro]") === null, "accepting removes the intro card");
+  check(events.join(",") === "start,step:0", "accepting starts the tour at step 0");
+  check(window.sessionStorage.getItem("stepshots_active_tour") === "welcome", "accepting stashes the active tour key");
+});
+
+await scenario("firstRun intro: declining never starts or re-offers the tour", async () => {
+  const window = loadPage();
+  const events = [];
+  const boot = () =>
+    window.StepshotsTour.autoBoot({
+      tracks: { welcome: twoStep },
+      firstRun: { key: "welcome", marker: "#btn1", intro: { title: "Welcome", body: "Tour?" } },
+      onEvent: (e) => events.push(eventTag(e)),
+    });
+  boot();
+  await delay();
+  const shadow = window.document.querySelector("[data-stepshots-intro]").shadowRoot;
+  check(shadow.querySelector(".start").textContent === "Show me around", "start label has a sensible default");
+  check(shadow.querySelector(".dismiss").textContent === "I'll explore on my own", "dismiss label has a sensible default");
+  shadow.querySelector(".dismiss").click();
+  check(window.document.querySelector("[data-stepshots-intro]") === null, "declining removes the intro card");
+  check(window.document.querySelector("[data-stepshots-tour]") === null, "declining does not start the tour");
+  check(events.length === 0, "declining emits no tour events");
+  boot();
+  await delay();
+  check(window.document.querySelector("[data-stepshots-intro]") === null, "a later autoBoot does not re-offer (seen)");
+});
+
+await scenario("firstRun intro: Escape declines", async () => {
+  const window = loadPage();
+  window.StepshotsTour.autoBoot({
+    tracks: { welcome: twoStep },
+    firstRun: { key: "welcome", marker: "#btn1", intro: { title: "Welcome", body: "Tour?" } },
+  });
+  await delay();
+  check(!!window.document.querySelector("[data-stepshots-intro]"), "intro card is open");
+  window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  check(window.document.querySelector("[data-stepshots-intro]") === null, "Escape removes the intro card");
+  check(window.document.querySelector("[data-stepshots-tour]") === null, "Escape does not start the tour");
+});
+
+await scenario("firstRun without intro still auto-starts immediately", async () => {
+  const window = loadPage();
+  const events = [];
+  window.StepshotsTour.autoBoot({
+    tracks: { welcome: twoStep },
+    firstRun: { key: "welcome", marker: "#btn1" },
+    onEvent: (e) => events.push(eventTag(e)),
+  });
+  await delay();
+  check(events.join(",") === "start,step:0", "marker starts the tour outright when no intro is configured");
+  check(!!window.document.querySelector("[data-stepshots-tour]"), "tour overlay mounted");
+});
+
+// ---------------------------------------------------------------------------
 
 await scenario("attribution badge — present with the badge option, absent without it", async () => {
   // With `badge`: a muted attribution anchor is rendered in the callout card.

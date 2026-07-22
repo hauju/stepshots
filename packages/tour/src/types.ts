@@ -95,6 +95,22 @@ export interface TourHandle {
 }
 
 /**
+ * The consent card offered before a first-run tour: a centered invitation with
+ * an accept and a decline button, so an auto-started tour never dims the screen
+ * unannounced. See {@link FirstRunTrigger.intro}.
+ */
+export interface FirstRunIntro {
+  /** Card heading, e.g. "Welcome 👋". */
+  title: string;
+  /** Invitation copy explaining what the tour covers. */
+  body: string;
+  /** Label of the accept button (default: "Show me around"). */
+  startLabel?: string;
+  /** Label of the decline button (default: "I'll explore on my own"). */
+  dismissLabel?: string;
+}
+
+/**
  * Auto-start a tour the first time a user reaches a given state — e.g. an empty
  * "no projects yet" screen — and never again. The app renders `marker` only in
  * that state; the player watches for it, starts the tour once, and remembers.
@@ -104,8 +120,10 @@ export interface FirstRunTrigger {
   key: string;
   /** CSS selector whose appearance signals first-run (watched until it mounts). */
   marker: string;
-  /** localStorage key recording that the tour was shown, so it never auto-starts again (default: `stepshots_tour_seen:<key>`). */
+  /** localStorage key recording that the tour was offered, so it never auto-starts again (default: `stepshots_tour_seen:<key>`). */
   seenKey?: string;
+  /** When set, the marker shows this consent card instead of starting the tour outright — the tour only starts if the user accepts. Declining (button or Escape) marks the tour seen, so it is never offered again. */
+  intro?: FirstRunIntro;
 }
 
 /** Options for the `<script>`-embed convenience. See `autoBoot`. */

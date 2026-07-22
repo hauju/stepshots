@@ -1,4 +1,12 @@
-import type { TourEvent, TourFallback, TourHandle, TourOptions, TourStep, TourTrack } from "./types";
+import type {
+  FirstRunIntro,
+  TourEvent,
+  TourFallback,
+  TourHandle,
+  TourOptions,
+  TourStep,
+  TourTrack,
+} from "./types";
 
 const DEFAULT_THEME = {
   accent: "#3b82f6",
@@ -232,6 +240,94 @@ function createOverlay(opts: TourOptions): Overlay {
 
   root.querySelector<HTMLElement>(".skip")!.addEventListener("click", () => overlay.onSkip?.());
   return overlay;
+}
+
+/**
+ * Show a consent card before a first-run tour: a centered invitation with an
+ * accept and a decline button, so an auto-started tour never dims the screen
+ * unannounced. Calls `onChoice(true)` when the user accepts, `false` when they
+ * decline (button or Escape). The card tears itself down on either choice.
+ *
+ * Non-modal like the rest of the player: the dim is visual only and the page
+ * stays clickable — but the choice itself is explicit (no dismiss-by-click-away,
+ * since declining is permanent for the browser).
+ */
+export function showIntro(
+  intro: FirstRunIntro,
+  options: TourOptions,
+  onChoice: (accepted: boolean) => void,
+): void {
+  const t = { ...DEFAULT_THEME, ...(options.theme ?? {}) };
+  const host = document.createElement("div");
+  host.setAttribute("data-stepshots-intro", "");
+  host.style.cssText = "position:fixed;inset:0;z-index:2147483000;pointer-events:none;";
+  const root = host.attachShadow({ mode: "open" });
+  root.innerHTML =
+    "<style>" +
+    ":host{all:initial}" +
+    `.dim{position:fixed;inset:0;background:${t.dim};opacity:0;transition:opacity .18s ease;pointer-events:none}` +
+    `.card{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);max-width:340px;width:calc(100vw - 48px);pointer-events:auto;background:${t.cardBg};color:${t.cardFg};border-radius:12px;padding:18px 20px;box-shadow:0 12px 34px rgba(2,6,23,.32);font-family:ui-sans-serif,system-ui,sans-serif;opacity:0;transition:opacity .18s ease}` +
+    ".card h4{margin:0 0 6px;font-size:16px;font-weight:700}" +
+    `.card p{margin:0;font-size:13px;line-height:1.5;color:${t.cardMuted}}` +
+    ".row{display:flex;align-items:center;justify-content:flex-end;gap:14px;margin-top:16px}" +
+    `.dismiss{background:none;border:0;color:${t.cardMuted};opacity:.8;font-size:12px;cursor:pointer;padding:0}` +
+    ".dismiss:hover{opacity:1}" +
+    `.start{background:${t.accent};color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:600;padding:8px 14px;cursor:pointer}` +
+    ".start:hover{filter:brightness(1.08)}" +
+    `.badge{display:block;margin-top:12px;font-size:10px;color:${t.cardMuted};opacity:.55;text-decoration:none;letter-spacing:.02em}` +
+    ".badge:hover{opacity:1;text-decoration:underline}" +
+    ".show{opacity:1}" +
+    "@media (prefers-reduced-motion:reduce){.dim,.card{transition:none}}" +
+    "</style>" +
+    '<div class="dim"></div>' +
+    '<div class="card" role="dialog" aria-label="Guided tour invitation"><h4></h4><p></p>' +
+    '<div class="row"><button class="dismiss" type="button"></button><button class="start" type="button"></button></div></div>';
+  document.body.appendChild(host);
+
+  const dim = root.querySelector<HTMLElement>(".dim")!;
+  const card = root.querySelector<HTMLElement>(".card")!;
+  // All copy is host-supplied — set via textContent so it can't inject markup.
+  root.querySelector<HTMLElement>("h4")!.textContent = intro.title;
+  root.querySelector<HTMLElement>("p")!.textContent = intro.body;
+  const startBtn = root.querySelector<HTMLElement>(".start")!;
+  const dismissBtn = root.querySelector<HTMLElement>(".dismiss")!;
+  startBtn.textContent = intro.startLabel ?? "Show me around";
+  dismissBtn.textContent = intro.dismissLabel ?? "I'll explore on my own";
+
+  // Same attribution treatment as the step card (see createOverlay).
+  if (options.badge) {
+    const badge = document.createElement("a");
+    badge.className = "badge";
+    badge.setAttribute("part", "badge");
+    badge.textContent = options.badge.label;
+    badge.href = options.badge.href;
+    badge.target = "_blank";
+    badge.rel = "noopener noreferrer";
+    card.appendChild(badge);
+  }
+
+  let decided = false;
+  function choose(accepted: boolean) {
+    if (decided) return;
+    decided = true;
+    document.removeEventListener("keydown", onKey, true);
+    host.remove();
+    onChoice(accepted);
+  }
+  function onKey(e: KeyboardEvent) {
+    if (e.key === "Escape") choose(false);
+  }
+  document.addEventListener("keydown", onKey, true);
+  startBtn.addEventListener("click", () => choose(true));
+  dismissBtn.addEventListener("click", () => choose(false));
+  startBtn.focus();
+  // Double-rAF so the fade-in transition plays after insertion.
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      dim.classList.add("show");
+      card.classList.add("show");
+    }),
+  );
 }
 
 /**
