@@ -22,6 +22,7 @@ recording (record once → screenshot demo *and* live tour); you can also hand-a
 
 ```sh
 bun add @stepshots/tour
+# or: npm install @stepshots/tour
 ```
 
 ## Programmatic use
@@ -56,10 +57,38 @@ named by `?tour=<key>` and keeps it alive across SPA navigations.
 
 Opening `…/dashboard?tour=create-project` then runs the tour.
 
+## First-run auto-start
+
+Offer a tour automatically the first time a user reaches a given state — e.g. an
+empty "no projects yet" screen. Render a marker element only in that state;
+`autoBoot` watches for it, shows a consent card, and starts the tour if the user
+accepts. Either way the offer is remembered (localStorage), so it never auto-starts
+again.
+
+```ts
+StepshotsTour.autoBoot({
+  firstRun: {
+    key: "create-project",
+    marker: '[data-stepshots-firstrun="create-project"]',
+    intro: { title: "Welcome 👋", body: "Want a quick tour of creating your first project?" },
+  },
+});
+```
+
+Omit `intro` to start the tour outright instead of asking first.
+
 ## API
 
 - `startTour(track, options?) → { stop() }` — render a track now.
 - `autoBoot(options?) → handle | null` — URL-param-driven entry for the embed; `tracks`
-  defaults to `window.__STEPSHOTS_TOURS`.
+  defaults to `window.__STEPSHOTS_TOURS`. Extra options: `param` (query param selecting
+  the track, default `"tour"`), `storageKey` (sessionStorage key that keeps the run
+  alive across SPA navigations), `firstRun` (auto-start on a marker, see above).
+- `showIntro(intro, options, onChoice)` — render the consent card standalone;
+  `onChoice(accepted)` tells you the user's pick.
 - Options: `theme` (`accent`, `dim`, `cardBg`, `cardFg`, `cardMuted`), `skipLabel`,
-  `waitTimeoutMs`, `onComplete(reason)`.
+  `waitTimeoutMs`, `inputSettleMs` (quiet time before an input step advances, default
+  1200ms), `onComplete(reason)`, `onEvent(event)` (lifecycle analytics:
+  `start` / `step` / `done` / `skip` / `lost`), `resumeKey` (sessionStorage key so a
+  full page reload resumes mid-tour), `badge` (`{ label, href }` attribution link in
+  the card footer).
