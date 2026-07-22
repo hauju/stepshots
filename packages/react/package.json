@@ -16,7 +16,11 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsup src/index.tsx --format esm,cjs --dts",
-    "dev": "tsup src/index.tsx --format esm,cjs --dts --watch"
+    "dev": "tsup src/index.tsx --format esm,cjs --dts --watch",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "react": ">=18"

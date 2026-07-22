@@ -19,7 +19,11 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --minify --clean",
     "dev": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --watch",
-    "test": "bun run build && node test/tour.test.mjs"
+    "test": "bun run build && node test/tour.test.mjs",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": ["stepshots", "product-tour", "onboarding", "walkthrough", "guided-tour"],
   "devDependencies": {
