@@ -6,7 +6,7 @@
 export type Advance =
   /** Advance when the user clicks inside the target element. */
   | { type: "click" }
-  /** Advance when the user types a non-empty value into the target element. */
+  /** Advance when the user has typed a non-empty value into the target element — once the value settles ({@link TourOptions.inputSettleMs}), or immediately on Enter / leaving the field. */
   | { type: "input" }
   /** Advance when the user changes the target's value, e.g. picks a dropdown option. */
   | { type: "change" };
@@ -77,6 +77,8 @@ export interface TourOptions {
   skipLabel?: string;
   /** How long to wait for a step's target to appear before showing the recovery card (ms, default 12000). */
   waitTimeoutMs?: number;
+  /** How long a non-empty value must sit unchanged before an input step advances (ms, default 1200) — so the spotlight doesn't jump away on the first keystroke. Enter or leaving the field commits immediately. */
+  inputSettleMs?: number;
   /** Called when the tour ends. `done` = finished the last step; `skip` = user dismissed it. */
   onComplete?: (reason: "done" | "skip") => void;
   /** Called at each tour lifecycle point (start / step / done / skip / lost) — for progress analytics. */

@@ -148,7 +148,10 @@ await scenario("accessibility + Escape dismissal", async () => {
 await scenario("event emission order — full run", async () => {
   const window = loadPage();
   const events = [];
-  window.StepshotsTour.startTour(twoStep, { onEvent: (e) => events.push(eventTag(e)) });
+  window.StepshotsTour.startTour(twoStep, {
+    inputSettleMs: 30,
+    onEvent: (e) => events.push(eventTag(e)),
+  });
 
   check(events.join(",") === "start,step:0", "start then step:0 emitted on launch");
   window.document.getElementById("btn1").click(); // click-advance step 0
@@ -156,7 +159,9 @@ await scenario("event emission order — full run", async () => {
 
   const field = window.document.getElementById("field1");
   field.value = "hello";
-  field.dispatchEvent(new window.Event("input", { bubbles: true })); // input-advance step 1
+  field.dispatchEvent(new window.Event("input", { bubbles: true })); // input step: settle-advance
+  check(events.at(-1) === "step:1", "typing does NOT advance immediately (settle pending)");
+  await delay(80); // past the 30ms settle window
   check(events.join(",") === "start,step:0,step:1,done", "full run emits start, step:0, step:1, done in order");
 });
 
@@ -228,6 +233,7 @@ await scenario("a throwing onEvent callback does not break the tour", async () =
   let threw = false;
   try {
     window.StepshotsTour.startTour(twoStep, {
+      inputSettleMs: 30,
       onEvent: () => {
         throw new Error("consumer analytics blew up");
       },
@@ -248,6 +254,7 @@ await scenario("a throwing onEvent callback does not break the tour", async () =
   const field = window.document.getElementById("field1");
   field.value = "hi";
   field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  await delay(80); // past the settle window
   check(completeReason === "done", "tour still completes (onComplete: done) with a throwing onEvent");
 });
 
@@ -288,12 +295,12 @@ await scenario("resume (2) reload at stored index resumes without re-emitting st
 
 await scenario("resume (3) finishing clears the stored key", async () => {
   const window = loadPage({ [RESUME_KEY]: "1" });
-  runResume(window);
+  runResume(window, { inputSettleMs: 30 });
   await delay();
   const field = window.document.getElementById("field1"); // resumed step (idx 1) is an input step
   field.value = "hello";
   field.dispatchEvent(new window.Event("input", { bubbles: true }));
-  await delay();
+  await delay(80); // past the settle window
   check(window.sessionStorage.getItem(RESUME_KEY) === null, "finishing (done) clears the resume key");
 });
 
@@ -304,6 +311,128 @@ await scenario("resume (4) out-of-range stored index starts fresh", async () => 
   check(events[0] === "start", "out-of-range index starts fresh (emits start)");
   check(events[1] === "step:0", "out-of-range starts at step 0");
   check(window.sessionStorage.getItem(RESUME_KEY) === "0", "out-of-range overwrites stale index with 0");
+});
+
+// ---------------------------------------------------------------------------
+// Input-step settle/commit behavior and walk-back validation.
+
+// Step 0 and 2 reuse #btn1 — the fixture only has one button, and reuse also
+// proves advance detection binds to the ACTIVE step, not to the element.
+const threeStep = {
+  steps: [
+    { selector: "#btn1", title: "Open the form", body: "Click.", advance: { type: "click" } },
+    { selector: "#field1", title: "Name it", body: "Type a name.", advance: { type: "input" } },
+    { selector: "#btn1", title: "Create it", body: "Hit create.", advance: { type: "click" } },
+  ],
+};
+
+await scenario("input settle: clearing the value cancels the pending advance", async () => {
+  const window = loadPage();
+  const events = [];
+  window.StepshotsTour.startTour(twoStep, { inputSettleMs: 40, onEvent: (e) => events.push(eventTag(e)) });
+  window.document.getElementById("btn1").click(); // → input step
+  const field = window.document.getElementById("field1");
+  field.value = "x";
+  field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  field.value = "";
+  field.dispatchEvent(new window.Event("input", { bubbles: true })); // emptied before settle
+  await delay(120);
+  check(events.at(-1) === "step:1", "emptying the field before the settle window cancels the advance");
+  field.value = "ok";
+  field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  await delay(120);
+  check(events.at(-1) === "done", "typing again after the cancel still settles and completes");
+});
+
+await scenario("Enter commits an input step immediately (no settle wait)", async () => {
+  const window = loadPage();
+  const events = [];
+  // Default 1200ms settle — an immediate `done` proves Enter committed, not the timer.
+  window.StepshotsTour.startTour(twoStep, { onEvent: (e) => events.push(eventTag(e)) });
+  window.document.getElementById("btn1").click();
+  const field = window.document.getElementById("field1");
+  field.value = "hello";
+  field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  field.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  check(events.at(-1) === "done", "Enter on the active field advances without waiting for settle");
+});
+
+await scenario("leaving the field (focusout) commits an input step immediately", async () => {
+  const window = loadPage();
+  const events = [];
+  window.StepshotsTour.startTour(twoStep, { onEvent: (e) => events.push(eventTag(e)) });
+  window.document.getElementById("btn1").click();
+  const field = window.document.getElementById("field1");
+  field.value = "hello";
+  field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  field.dispatchEvent(new window.Event("focusout", { bubbles: true })); // e.g. mousedown on Create
+  check(events.at(-1) === "done", "blurring the active field advances without waiting for settle");
+
+  // An EMPTY field must not commit on blur.
+  const window2 = loadPage();
+  const events2 = [];
+  window2.StepshotsTour.startTour(twoStep, { onEvent: (e) => events2.push(eventTag(e)) });
+  window2.document.getElementById("btn1").click();
+  window2.document.getElementById("field1").dispatchEvent(new window2.Event("focusout", { bubbles: true }));
+  check(events2.at(-1) === "step:1", "blurring an empty field does not advance");
+});
+
+await scenario("resume walks back past an input step whose field is empty again", async () => {
+  const window = loadPage({ [RESUME_KEY]: "2" }); // stored: the final "Create it" step
+  const events = [];
+  window.StepshotsTour.startTour(threeStep, { resumeKey: RESUME_KEY, onEvent: (e) => events.push(eventTag(e)) });
+  await delay();
+  check(events[0] === "step:1", "resume re-enters at the unmet input step, not the stored one");
+  const stepLabel = window.document.querySelector("[data-stepshots-tour]").shadowRoot.querySelector(".step");
+  check(stepLabel.textContent === "Step 2 of 3", "overlay shows 'Step 2 of 3' after walking back");
+  check(window.sessionStorage.getItem(RESUME_KEY) === "1", "walk-back rewrites the stored index");
+});
+
+await scenario("resume keeps the stored step when earlier input steps still hold", async () => {
+  const window = loadPage({ [RESUME_KEY]: "2" });
+  window.document.getElementById("field1").value = "kept"; // earlier requirement still met
+  const events = [];
+  window.StepshotsTour.startTour(threeStep, { resumeKey: RESUME_KEY, onEvent: (e) => events.push(eventTag(e)) });
+  await delay();
+  check(events[0] === "step:2", "resume stays on the stored step when the earlier field has a value");
+});
+
+await scenario("clearing an earlier step's field walks the tour back live", async () => {
+  const window = loadPage();
+  const events = [];
+  window.StepshotsTour.startTour(threeStep, { inputSettleMs: 30, onEvent: (e) => events.push(eventTag(e)) });
+  window.document.getElementById("btn1").click(); // → input step
+  const field = window.document.getElementById("field1");
+  field.value = "My project";
+  field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  field.dispatchEvent(new window.Event("focusout", { bubbles: true })); // commit → "Create it" step
+  check(events.at(-1) === "step:2", "committed name advances to the final step");
+  field.value = "";
+  field.dispatchEvent(new window.Event("input", { bubbles: true })); // user clears the name again
+  check(events.at(-1) === "step:1", "emptying the earlier field walks the tour back to the input step");
+});
+
+await scenario("SPA nav away and back re-validates earlier input steps", async () => {
+  const window = loadPage();
+  const events = [];
+  window.StepshotsTour.startTour(threeStep, { inputSettleMs: 30, onEvent: (e) => events.push(eventTag(e)) });
+  const btn = window.document.getElementById("btn1");
+  btn.click(); // → input step
+  const field = window.document.getElementById("field1");
+  field.value = "My project";
+  field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  field.dispatchEvent(new window.Event("focusout", { bubbles: true })); // commit → "Create it" step
+  check(events.at(-1) === "step:2", "on the final step before navigating away");
+
+  btn.remove(); // "navigate away": the target unmounts…
+  field.value = ""; // …and the form state is gone (no input event — remount, not typing)
+  await delay(120); // let the rAF loop lose the target
+  const fresh = window.document.createElement("button");
+  fresh.id = "btn1";
+  fresh.textContent = "Create project";
+  window.document.body.appendChild(fresh); // "navigate back": target remounts, field empty
+  await delay(120); // let the rAF loop re-acquire
+  check(events.at(-1) === "step:1", "re-acquiring the target with an empty earlier field walks back");
 });
 
 // ---------------------------------------------------------------------------

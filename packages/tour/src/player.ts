@@ -252,6 +252,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
 
   const steps = track.steps;
   const waitTimeoutMs = options.waitTimeoutMs ?? 12000;
+  const inputSettleMs = options.inputSettleMs ?? 1200;
   const overlay = createOverlay(options);
   // Resume mid-tour after a full page reload: an in-range stored index (> 0) means
   // the same run continues at that step. Anything else (missing/NaN/0/out of range
@@ -266,6 +267,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
   let activeEl: HTMLElement | null = null;
   let rafId: number | null = null;
   let waitTimer: ReturnType<typeof setTimeout> | null = null;
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
   let observer: MutationObserver | null = null;
   let done = false;
 
@@ -289,9 +291,17 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
       clearTimeout(waitTimer);
       waitTimer = null;
     }
+    clearSettle();
     if (observer) {
       observer.disconnect();
       observer = null;
+    }
+  }
+
+  function clearSettle() {
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
     }
   }
 
@@ -300,6 +310,7 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("input", onInput, true);
     document.removeEventListener("change", onChange, true);
+    document.removeEventListener("focusout", onFocusOut, true);
     document.removeEventListener("keydown", onKey, true);
     overlay.destroy();
   }
@@ -330,43 +341,102 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     // No spotlight resolved (recovery state) — best-effort selector match.
     return !!active && safeClosest(target, active.selector);
   }
+  // Like hitsActive, but for value-bearing steps (input/change): the fallback
+  // requires the target itself to MATCH the selector, not just sit inside it.
+  function hitsActiveField(target: Element): boolean {
+    if (activeEl) return activeEl === target || activeEl.contains(target);
+    return !!active && safeMatches(target, active.selector);
+  }
+  /** `true` when the element carries a string value that is empty/whitespace. */
+  function fieldEmpty(el: Element): boolean {
+    const v = (el as HTMLInputElement).value;
+    return typeof v === "string" && v.trim().length === 0;
+  }
+  /**
+   * A passed input step whose requirement no longer holds (its field is empty
+   * again — e.g. the tour resumed on a freshly remounted form). Returns the
+   * earliest such step index before `upTo`, or `upTo` when everything holds.
+   * A step whose target can't be resolved right now can't be verified — skip it.
+   */
+  function earliestUnmetInput(upTo: number): number {
+    for (let i = 0; i < upTo; i++) {
+      const s = steps[i];
+      if (s.advance.type !== "input") continue;
+      const el = resolveTarget(s);
+      if (el && fieldEmpty(el)) return i;
+    }
+    return upTo;
+  }
   function onClick(e: MouseEvent) {
     if (active?.advance.type === "click" && hitsActive(e.target as Element | null)) advance();
   }
   function onInput(e: Event) {
-    if (active?.advance.type !== "input") return;
-    const target = e.target as HTMLInputElement | null;
-    if (!target || String(target.value || "").trim().length === 0) return;
-    if (activeEl) {
-      if (activeEl === target || activeEl.contains(target)) advance();
-    } else if (active && safeMatches(target, active.selector)) {
-      advance();
+    const target = e.target as Element | null;
+    if (!target) return;
+    if (active?.advance.type === "input" && hitsActiveField(target)) {
+      // Never advance on the first keystroke — that would yank the spotlight
+      // away mid-typing. Advance once the value settles; Enter or leaving the
+      // field (onKey / onFocusOut) commits immediately.
+      clearSettle();
+      if (fieldEmpty(target)) return; // emptied — nothing pending
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        if (!done) advance();
+      }, inputSettleMs);
+      return;
     }
+    // Typing in a field owned by an EARLIER input step (e.g. the user cleared
+    // the project name while the tour already points at Create): if it's empty
+    // now, walk back so the tour never asks for an action that can't succeed.
+    if (fieldEmpty(target)) {
+      for (let i = 0; i < idx; i++) {
+        const s = steps[i];
+        if (s.advance.type === "input" && safeMatches(target, s.selector)) {
+          idx = i;
+          startStep();
+          return;
+        }
+      }
+    }
+  }
+  /** Enter / blur on the active input step commits a non-empty value right away. */
+  function commitInput(target: Element) {
+    if (fieldEmpty(target)) return;
+    clearSettle();
+    advance();
+  }
+  function onFocusOut(e: Event) {
+    if (active?.advance.type !== "input") return;
+    const target = e.target as Element | null;
+    if (target && hitsActiveField(target)) commitInput(target);
   }
   function onChange(e: Event) {
     // A `change` event means a committed value (e.g. a picked dropdown option),
     // so there's no emptiness check like `input`.
     if (active?.advance.type !== "change") return;
     const target = e.target as Element | null;
-    if (!target) return;
-    if (activeEl) {
-      if (activeEl === target || activeEl.contains(target)) advance();
-    } else if (active && safeMatches(target, active.selector)) {
-      advance();
-    }
+    if (target && hitsActiveField(target)) advance();
   }
   function onKey(e: KeyboardEvent) {
     // Esc dismisses like Skip. Don't preventDefault/stopPropagation — the host
     // page may also react to Esc and that's fine.
-    if (e.key === "Escape") finish("skip");
+    if (e.key === "Escape") return finish("skip");
+    if (e.key === "Enter" && active?.advance.type === "input") {
+      const target = e.target as Element | null;
+      if (target && hitsActiveField(target)) commitInput(target);
+    }
   }
   document.addEventListener("click", onClick, true);
   document.addEventListener("input", onInput, true);
   document.addEventListener("change", onChange, true);
+  document.addEventListener("focusout", onFocusOut, true);
   document.addEventListener("keydown", onKey, true);
 
-  function startStep() {
+  function startStep(): void {
     clearStep(); // stop the previous step's loop/observer/timer first
+    // Walk back before announcing anything: a passed input step whose field is
+    // empty again (resumed on a reset form) must be redone before this one.
+    idx = earliestUnmetInput(idx);
     active = steps[idx];
     activeEl = null;
     if (resumeKey) writeResume(resumeKey, idx); // so a reload re-enters at this step
@@ -374,14 +444,14 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     overlay.hide();
     overlay.setText(active.title, active.body, idx, steps.length);
     const el = resolveTarget(active);
-    if (el) return track_(el);
+    if (el) return acquire(el);
     // Not mounted yet (SPA nav / loading gate) — wait for it.
     observer = new MutationObserver(() => {
       if (done) return;
       const found = resolveTarget(active!);
       if (found) {
         clearStep();
-        track_(found);
+        acquire(found);
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -400,6 +470,19 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
     }, waitTimeoutMs);
   }
 
+  // A step target is live — but before spotlighting it, make sure the steps that
+  // led here still hold (a resumed run may re-enter a form that reset in the
+  // meantime). If an earlier input step's field is empty again, walk back to it
+  // instead of asking for an action that can't succeed.
+  function acquire(el: HTMLElement): void {
+    const back = earliestUnmetInput(idx);
+    if (back < idx) {
+      idx = back;
+      return startStep();
+    }
+    track_(el);
+  }
+
   function track_(el: HTMLElement) {
     activeEl = el;
     el.scrollIntoView({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
@@ -412,6 +495,16 @@ export function startTour(track: TourTrack, options: TourOptions = {}): TourHand
         activeEl = null;
         overlay.hide();
       } else {
+        if (activeEl === null) {
+          // Re-acquired after the target went away (SPA nav away and back). The
+          // form may have remounted empty — re-run the walk-back check first.
+          const back = earliestUnmetInput(idx);
+          if (back < idx) {
+            idx = back;
+            startStep();
+            return; // startStep took over; don't reschedule this loop
+          }
+        }
         el = cur;
         activeEl = cur;
         const r = el.getBoundingClientRect();
