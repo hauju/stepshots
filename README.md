@@ -2,9 +2,9 @@
 
 Open-source tools for recording interactive product demos.
 
-This repo contains the **CLI**, **Chrome extension**, and **React SDK** for [Stepshots](https://stepshots.com) — capture step-by-step screenshots, bundle them into `.stepshot` files, and embed them anywhere.
+This repo contains the **CLI**, **Chrome extension**, **React SDK**, and **live guided-tour player** for [Stepshots](https://stepshots.com) — capture step-by-step screenshots, bundle them into `.stepshot` files, embed them anywhere, and replay a recording as guided onboarding on your real app.
 
-Learn more on the [CLI page](https://stepshots.com/cli), or read the full [documentation](https://stepshots.com/docs/getting-started/introduction).
+Learn more on the [CLI page](https://stepshots.com/cli) and the [live tours page](https://stepshots.com/tour), or read the full [documentation](https://stepshots.com/docs/getting-started/introduction).
 
 ## Installation
 
@@ -181,6 +181,16 @@ import { StepshotsDemo } from "@stepshots/react";
 
 See [`packages/react/`](packages/react/) or the [React SDK guide](https://stepshots.com/docs/guides/react-sdk) for full props documentation.
 
+## Live Tour Player
+
+```sh
+bun add @stepshots/tour
+```
+
+A framework-agnostic player that replays a recorded flow as a live guided tour on your real app — spotlighting the next element and advancing on the user's actual clicks and typing. Produce a track with `stepshots tour export`, or let [stepshots.com](https://stepshots.com) host tours for you with a single script tag.
+
+See [`packages/tour/`](packages/tour/) or the [live tours guide](https://stepshots.com/docs/guides/live-tours).
+
 ## Embed Examples
 
 The `examples/` directory has ready-to-use HTML files showing how to embed Stepshots demos (see the [embedding guide](https://stepshots.com/docs/guides/embedding)):
@@ -195,6 +205,7 @@ The `examples/` directory has ready-to-use HTML files showing how to embed Steps
 - **`crates/manifest/`** — Shared types for config files and `.stepshot` bundles (`stepshots-manifest`)
 - **`extension/`** — Chrome extension for in-browser recording
 - **`packages/react/`** — React component (`@stepshots/react`)
+- **`packages/tour/`** — Live guided-tour player (`@stepshots/tour`)
 - **`examples/`** — Embed integration examples
 - **`skills/`** — Claude Code skills for AI-assisted demo creation
 

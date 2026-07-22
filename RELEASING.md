@@ -6,14 +6,15 @@ This repo ships two independently-versioned things.
 |-----------|-------------------------|-----|--------------|
 | CLI + Chrome extension (the "recorder", released together) | `Cargo.toml` (`workspace.package.version`) **and** `extension/manifest.json` — keep them equal | `vX.Y.Z` | GitHub Release (`.github/workflows/release.yml`) + crates.io (hand-published) |
 | `@stepshots/react` SDK | `packages/react/package.json` | `react-vX.Y.Z` | npm (hand-published) |
+| `@stepshots/tour` player | `packages/tour/package.json` | `tour-vX.Y.Z` | npm (hand-published) |
 
 **Rule:** the committed version *is* the source of truth; the tag only has to agree with it.
 The CLI enforces this — `cargo build` embeds the `Cargo.toml` version into the binary, so a
 tag can never override it. The `check-versions` job in `release.yml` fails the release unless
 the tag equals both the Cargo workspace version and `extension/manifest.json`.
 
-`vX.Y.Z` and `react-vX.Y.Z` are separate tag namespaces; the `v*` release workflow does not
-fire on `react-v*` tags.
+`vX.Y.Z`, `react-vX.Y.Z`, and `tour-vX.Y.Z` are separate tag namespaces; the `v*` release
+workflow does not fire on `react-v*` or `tour-v*` tags.
 
 ## Cut a CLI + extension release (`vX.Y.Z`)
 
@@ -59,6 +60,23 @@ bun publish            # or: npm publish --access public
 git tag -a react-vX.Y.Z -m "React SDK vX.Y.Z"
 git push origin react-vX.Y.Z
 ```
+
+## Release the tour player (`tour-vX.Y.Z`)
+
+Currently hand-published (no workflow yet). `prepublishOnly` builds `dist/` automatically,
+and `publishConfig` sets public access — publishing requires the npm 2FA browser approval:
+
+```sh
+cd packages/tour
+# bump "version" in package.json first
+bun install
+bun publish
+git tag -a tour-vX.Y.Z -m "Tour player vX.Y.Z"
+git push origin tour-vX.Y.Z
+```
+
+If the dashboard should serve the new build, also re-vendor the IIFE into stepshots-dx's
+`assets/tour.js` (the hosted-loader header and loader code live around the vendored bundle).
 
 ## Versioning policy
 
