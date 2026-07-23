@@ -282,6 +282,24 @@ enum TourCommands {
         #[arg(long, short, default_value = "tours.js")]
         output: PathBuf,
     },
+    /// Push tour files to Stepshots hosting (upsert by key; git stays canonical)
+    Push {
+        /// Tour files or directories (default: tours/)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
+
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+
+        /// API token (defaults to the stored login token)
+        #[arg(long, env = "STEPSHOTS_TOKEN")]
+        token: Option<String>,
+    },
     /// Print the JSON Schema for *.tour.json files
     Schema,
     /// Deprecated: use `tour init --from <bundle>` or `tour build`
@@ -388,6 +406,21 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             }
             TourCommands::Build { paths, output } => {
                 commands::tour::build(&paths, &output, json)?;
+            }
+            TourCommands::Push {
+                paths,
+                server,
+                token,
+            } => {
+                let token = token
+                    .or_else(|| auth::stored_token_for(&server))
+                    .ok_or_else(|| {
+                        CliError::Auth(
+                            "No API token. Run `stepshots login`, or set STEPSHOTS_TOKEN / use --token."
+                                .into(),
+                        )
+                    })?;
+                commands::tour::push(&paths, &server, &token, json).await?;
             }
             TourCommands::Schema => {
                 println!("{}", commands::schema::generate_tour()?);

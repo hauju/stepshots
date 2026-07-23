@@ -96,7 +96,12 @@ stepshots tour check --url https://staging.example.com --update-fallbacks
 
 # Merge tour files into a window.__STEPSHOTS_TOURS script for script-tag installs
 stepshots tour build -o public/tours.js
+
+# Or let stepshots.com host them: upsert by key, get a one-line embed script
+stepshots tour push
 ```
+
+`push` is one-way: your git files stay the source of truth, and pushing overwrites the hosted copy. Hosted tours get anonymous run analytics in the dashboard.
 
 Tag a tutorial with `"target": "tour"` in `stepshots.config.json` and `record` warns about interactive steps without a callout (they'd be dropped from the tour) and scaffolds the tour file automatically. `verify` and `tour check` are siblings: one guards your demos, the other your tours.
 

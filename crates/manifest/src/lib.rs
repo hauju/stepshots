@@ -720,7 +720,7 @@ impl TourAdvance {
 
 /// Resilient anchors the player falls back to when `selector` no longer matches
 /// the live DOM (UI drift). Captured from the target element at record time.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TourFallback {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -737,7 +737,7 @@ impl TourFallback {
 }
 
 /// One step of a live tour: spotlight `selector`, show `title`/`body`, advance on interaction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TourStep {
     pub selector: String,
     pub title: String,
@@ -748,7 +748,7 @@ pub struct TourStep {
 }
 
 /// An ordered set of tour steps — the data contract consumed by the `@stepshots/tour` player.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TourTrack {
     pub steps: Vec<TourStep>,
 }
@@ -830,7 +830,7 @@ pub const TOUR_FILE_SCHEMA_VERSION: &str = "1";
 
 /// Hints used only by `stepshots tour check` when replaying the tour against
 /// a live app. Stripped by [`TourFile::to_track`] — never served to the player.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TourCheck {
@@ -854,7 +854,7 @@ impl TourCheck {
 
 /// One step of a tour source file: the player's step contract plus optional
 /// validation hints.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TourFileStep {
@@ -891,7 +891,7 @@ impl TourFileStep {
 
 /// A guided-tour source file (`*.tour.json`) — one tour per file, versioned
 /// in the app repo whose DOM it targets.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TourFile {

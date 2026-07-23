@@ -127,6 +127,113 @@ pub fn export(
     Ok(())
 }
 
+/// Push tour source files to the dashboard: upsert hosted tours by `key`.
+/// One-way sync — git stays the source of truth, the hosted copy is
+/// overwritten, never merged. Check hints are stripped; only the runtime
+/// track plus metadata is sent.
+pub async fn push(
+    paths: &[PathBuf],
+    server_url: &str,
+    token: &str,
+    json: bool,
+) -> Result<(), CliError> {
+    let files = collect_tour_files(paths)?;
+    let client = reqwest::Client::new();
+    let server = server_url.trim_end_matches('/');
+    let mut pushed: Vec<serde_json::Value> = Vec::new();
+
+    for path in &files {
+        let file = load_tour_file(path)
+            .map_err(|e| CliError::Config(format!("{}: {e}", path.display())))?;
+        let track = file.to_track();
+        if track.steps.is_empty() {
+            return Err(CliError::Config(format!(
+                "{}: tour has no steps",
+                path.display()
+            )));
+        }
+
+        let body = serde_json::json!({
+            "schema": file.schema,
+            "key": file.key,
+            "title": file.title,
+            "steps": track.steps,
+        });
+        let resp = client
+            .put(format!("{server}/api/tours/push"))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(push_error(&file.key, resp).await);
+        }
+        let response: serde_json::Value = resp.json().await?;
+        let id = response
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CliError::Upload("API response missing 'id' field".into()))?
+            .to_string();
+        let created = response
+            .get("created")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        if !json {
+            println!(
+                "{} \"{}\" ({} steps)",
+                if created { "Created" } else { "Updated" },
+                file.key,
+                track.steps.len()
+            );
+            println!("  Track: {server}/api/tours/public/{id}/track");
+            println!(
+                "  Embed: <script src=\"{server}/tour.js\" data-stepshots-tour=\"{id}\" defer></script>"
+            );
+        }
+        pushed.push(serde_json::json!({
+            "path": path.display().to_string(),
+            "key": file.key,
+            "id": id,
+            "created": created,
+            "steps": track.steps.len(),
+        }));
+    }
+
+    if json {
+        let out = serde_json::json!({
+            "success": true,
+            "command": "tour push",
+            "server": server,
+            "tours": pushed,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).expect("serializing tour push output")
+        );
+    }
+    Ok(())
+}
+
+/// Turn a non-success push response into a helpful error, mirroring upload's
+/// 401 handling.
+async fn push_error(key: &str, resp: reqwest::Response) -> CliError {
+    let status = resp.status();
+    if status.as_u16() == 401 {
+        return CliError::Auth(
+            "API token is invalid or expired. Run `stepshots login` again, \
+             or check --token / STEPSHOTS_TOKEN."
+                .into(),
+        );
+    }
+    let body = resp.text().await.unwrap_or_default();
+    let message = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+        .unwrap_or(body);
+    CliError::Upload(format!("Push \"{key}\" failed ({status}): {message}"))
+}
+
 /// Scaffold a guided-tour source file at `tours/<key>.tour.json` (or `output`).
 /// With `from`, projects the recorded bundle once — after that the tour file is
 /// independent of the recording.
