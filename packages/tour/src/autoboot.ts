@@ -86,12 +86,21 @@ function begin(
   });
 }
 
+/** Attribute that turns any element into a "show me" launcher for a track. */
+const TRIGGER_ATTR = "data-stepshots-tour-trigger";
+
 /**
  * Zero-config entry point for the `<script>` embed. In priority order it:
  *   1. starts the track named by the URL param (e.g. `?tour=create-project`),
  *      resuming across SPA navigations via sessionStorage; else
  *   2. if `firstRun` is set, auto-starts that tour the first time its `marker`
  *      appears — once per browser (localStorage).
+ *
+ * Independently of both, any element carrying
+ * `data-stepshots-tour-trigger="<key>"` starts that track on click — the
+ * show-me-instead-of-tell-me primitive for FAQ items, help menus, and empty
+ * states. Delegated, so triggers rendered later (SPA views, accordions) work
+ * without re-binding.
  *
  * `tracks` defaults to `window.__STEPSHOTS_TOURS`. Returns a handle when a tour
  * starts synchronously (the param path), else null (first-run starts async).
@@ -107,6 +116,25 @@ export function autoBoot(opts: AutoBootOptions = {}): TourHandle | null {
   const storageKey = opts.storageKey ?? "stepshots_active_tour";
   // Persist the step index alongside the key stash so a full page reload resumes.
   const resumeKey = `${storageKey}:step`;
+
+  // Show-me triggers. The registry is re-read at click time so tracks merged
+  // after boot (multiple `tour build` scripts) still resolve. Starting is safe
+  // while a tour runs — the player's one-at-a-time guard makes it a no-op.
+  document.addEventListener("click", (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    const el = target?.closest(`[${TRIGGER_ATTR}]`);
+    if (!el) return;
+    const key = el.getAttribute(TRIGGER_ATTR);
+    const live = opts.tracks ?? window.__STEPSHOTS_TOURS ?? {};
+    if (!key || !live[key]) return;
+    e.preventDefault();
+    try {
+      sessionStorage.setItem(storageKey, key);
+      // An explicit click is a deliberate fresh start — begin at step 0.
+      sessionStorage.removeItem(resumeKey);
+    } catch {}
+    begin(live[key], storageKey, resumeKey, opts);
+  });
 
   // 1. Explicit or resumed tour — highest priority.
   const hit = resolveKey(tracks, param, storageKey);

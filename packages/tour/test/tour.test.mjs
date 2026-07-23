@@ -541,6 +541,51 @@ await scenario("attribution badge — present with the badge option, absent with
   check(cardWithout.querySelector("a") === null, "no anchor is rendered in the card when badge is omitted");
 });
 
+await scenario("show-me trigger starts a registry track on click", async () => {
+  const window = loadPage();
+  const { document } = window;
+  // An FAQ-style launcher plus a decoy — only the marked element may start a tour.
+  const faq = document.createElement("button");
+  faq.setAttribute("data-stepshots-tour-trigger", "faq-demo");
+  faq.textContent = "Show me";
+  document.body.appendChild(faq);
+  const decoy = document.createElement("button");
+  decoy.textContent = "Unrelated";
+  document.body.appendChild(decoy);
+
+  window.__STEPSHOTS_TOURS = { "faq-demo": twoStep };
+  window.StepshotsTour.autoBoot();
+
+  decoy.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await delay();
+  check(
+    !document.querySelector("[data-stepshots-tour]"),
+    "clicks outside a trigger start nothing",
+  );
+
+  faq.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await delay();
+  const host = document.querySelector("[data-stepshots-tour]");
+  check(!!host, "clicking the trigger mounts the tour overlay");
+  const title = host?.shadowRoot?.querySelector("h4")?.textContent;
+  check(title === "Step one", "the triggered tour starts at step 0 with the track's copy");
+  check(
+    window.sessionStorage.getItem("stepshots_active_tour") === "faq-demo",
+    "the trigger stashes the active key so SPA navigations resume it",
+  );
+
+  // A trigger naming an unknown key is ignored (no crash, no overlay churn).
+  const bad = document.createElement("button");
+  bad.setAttribute("data-stepshots-tour-trigger", "nope");
+  document.body.appendChild(bad);
+  bad.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await delay();
+  check(
+    document.querySelectorAll("[data-stepshots-tour]").length === 1,
+    "an unknown trigger key changes nothing",
+  );
+});
+
 // ---------------------------------------------------------------------------
 
 console.log(`\n${"-".repeat(48)}`);

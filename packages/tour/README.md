@@ -77,6 +77,23 @@ StepshotsTour.autoBoot({
 
 Omit `intro` to start the tour outright instead of asking first.
 
+## Show-me triggers (FAQ / help center)
+
+Any element carrying `data-stepshots-tour-trigger="<key>"` starts that track on
+click — turn FAQ answers, help menus, and empty states into launchers that show
+instead of tell:
+
+```html
+<details>
+  <summary>How do I create a project?</summary>
+  <button data-stepshots-tour-trigger="create-project">Show me</button>
+</details>
+```
+
+Bound once by `autoBoot` via event delegation, so triggers rendered later (SPA
+views, accordions) work without re-binding. A click always starts fresh at step 0.
+See `examples/faq-show-me.html` in the repo for a complete page.
+
 ## API
 
 - `startTour(track, options?) → { stop() }` — render a track now.

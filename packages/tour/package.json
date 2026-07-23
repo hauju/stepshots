@@ -1,7 +1,7 @@
 {
   "name": "@stepshots/tour",
-  "version": "0.1.0",
-  "description": "Framework-agnostic live guided-tour player for Stepshots recordings — spotlight the next element on your real app and light the way",
+  "version": "0.2.0",
+  "description": "Framework-agnostic live guided-tour player for Stepshots recordings \u2014 spotlight the next element on your real app and light the way",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -15,7 +15,9 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --minify --clean",
     "dev": "tsup src/index.ts --format esm,cjs,iife --global-name StepshotsTour --dts --watch",
@@ -25,7 +27,13 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["stepshots", "product-tour", "onboarding", "walkthrough", "guided-tour"],
+  "keywords": [
+    "stepshots",
+    "product-tour",
+    "onboarding",
+    "walkthrough",
+    "guided-tour"
+  ],
   "devDependencies": {
     "jsdom": "^29.1.1",
     "tsup": "^8.0.0",
