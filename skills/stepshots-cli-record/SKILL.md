@@ -7,9 +7,11 @@ description: |
   a demo for sharing or embedding, check whether recorded demos are still up to date
   (demo drift detection with `stepshots verify`), repair a drifted demo, keep a demo
   fresh from CI, or turn an existing saved Stepshots demo into a CLI recording config.
+  Also covers guided tours: recording with `"target": "tour"`, authoring/validating
+  tours/<key>.tour.json files, and `stepshots tour init/validate/check/build`.
   Works for both CLI-first and AI-assisted workflows.
 author: Hauke Jung
-version: 2.3.0
+version: 2.4.0
 ---
 
 # Stepshots CLI Screenshot Demo Skill
@@ -97,6 +99,42 @@ Default to this structure:
    - `wait` if the new state itself should be shown
 
 Avoid flows that are mostly scrolling or passive navigation.
+
+## Recording for a Guided Tour
+
+Stepshots produces two distinct assets, and the recording should know which one it's for:
+
+- A **demo** is a screenshot artifact: sell voice, populated account, setup steps
+  (navigate/wait/scroll) are legitimate content.
+- A **guided tour** is a live overlay on the user's own app: instruct voice, and only
+  interactive steps with a callout become tour steps. Its source of truth is a
+  `tours/<key>.tour.json` file versioned in the app repo — the recording is only the
+  scaffold that contributes selectors and fallback anchors once.
+
+When the user wants a tour, set `"target": "tour"` on the tutorial and adjust how you
+build the config:
+
+1. **Voice**: callouts are instructions to the end user ("Click **New project** to
+   create your first workspace"), not marketing copy.
+2. **Starting state**: record on a fresh/empty account — the tour plays during
+   activation, so the flow must work from the empty state, not a populated one.
+3. **Coverage**: every `click`/`type`/`select` step needs a highlight callout, or it is
+   silently dropped from the tour. `record` warns about violations. Navigations and
+   waits never appear in tours — they only stage the recording.
+4. **After recording**: `record` scaffolds `tours/<key>.tour.json` if it doesn't exist
+   (an existing file is never overwritten — it's hand-edited source). Then:
+   - `stepshots tour validate` — strict parse + lints, CI exit codes.
+   - `stepshots tour check --url <staging>` — headless replay against a live deploy;
+     `ok` = selector matched, `drift` = fallback anchor matched, `fail` = neither.
+     `--update-fallbacks` refreshes text/aria anchors from the live DOM.
+   - `stepshots tour build -o public/tours.js` — registry script for script-tag
+     installs; bundler users import the `.tour.json` directly.
+5. **Editing later**: edit the tour file, not the recording. Re-scaffold only when the
+   flow itself changed: `stepshots tour init <key> --from <bundle> --force`.
+
+For steps with `advance: input`/`change`, add a `check.value` so `tour check` can
+type/select something realistic during replay. Use `check.path` when a step can't be
+reached through the previous step's advance alone (e.g. after a full-page redirect).
 
 ## Preferred Actions
 

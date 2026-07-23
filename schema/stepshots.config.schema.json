@@ -362,6 +362,21 @@
         "body"
       ]
     },
+    "RecordingTarget": {
+      "description": "What a tutorial records for.",
+      "oneOf": [
+        {
+          "description": "A screenshot demo (the default).",
+          "type": "string",
+          "const": "demo"
+        },
+        {
+          "description": "A guided tour: interactive steps need highlight callouts, and the\nrecorder scaffolds `tours/<key>.tour.json` after recording.",
+          "type": "string",
+          "const": "tour"
+        }
+      ]
+    },
     "StepConfig": {
       "description": "A single step action in a tutorial.",
       "type": "object",
@@ -542,6 +557,17 @@
           "items": {
             "$ref": "#/$defs/StepConfig"
           }
+        },
+        "target": {
+          "description": "What this tutorial records for: a screenshot \"demo\" (default) or a\nguided \"tour\". Tour recordings warn about interactive steps without a\ncallout (the tour projection drops them) and scaffold\n`tours/<key>.tour.json` after recording.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordingTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "title": {
           "description": "Human-readable title, shown in the dashboard and used as the demo title on upload.",

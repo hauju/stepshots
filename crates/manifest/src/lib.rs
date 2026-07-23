@@ -82,6 +82,18 @@ pub struct StepshotsConfig {
     pub tutorials: HashMap<String, TutorialConfig>,
 }
 
+/// What a tutorial records for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingTarget {
+    /// A screenshot demo (the default).
+    Demo,
+    /// A guided tour: interactive steps need highlight callouts, and the
+    /// recorder scaffolds `tours/<key>.tour.json` after recording.
+    Tour,
+}
+
 /// A single tutorial within the config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -94,6 +106,12 @@ pub struct TutorialConfig {
     /// Optional longer description of what the tutorial shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// What this tutorial records for: a screenshot "demo" (default) or a
+    /// guided "tour". Tour recordings warn about interactive steps without a
+    /// callout (the tour projection drops them) and scaffold
+    /// `tours/<key>.tour.json` after recording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<RecordingTarget>,
     /// Ordered actions to perform; each step becomes one screenshot in the demo.
     pub steps: Vec<StepConfig>,
 }
@@ -667,6 +685,7 @@ pub struct BundleManifest {
 
 /// How a live-tour step advances to the next. Serializes as `{ "type": "click" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TourAdvance {
     /// Advance when the user clicks inside the target element.
@@ -702,6 +721,7 @@ impl TourAdvance {
 /// Resilient anchors the player falls back to when `selector` no longer matches
 /// the live DOM (UI drift). Captured from the target element at record time.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TourFallback {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -785,6 +805,140 @@ impl BundleManifest {
             })
             .collect();
         TourTrack { steps }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Guided-tour source files (*.tour.json)
+//
+// The git-versioned source format for a guided tour. Steps are exactly the
+// player's `TourStep` contract plus validation-only `check` hints, so the
+// source shape and the runtime shape can't drift. `stepshots tour init`
+// scaffolds one (optionally from a recording), `tour validate`/`tour check`
+// verify it, and `tour build`/`tour push` strip it down to a `TourTrack`.
+// ---------------------------------------------------------------------------
+
+/// Canonical URL of the published JSON Schema for `*.tour.json` files.
+/// Written as the `$schema` key by `stepshots tour init` so editors provide
+/// autocomplete and validation.
+pub const TOUR_SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/hauju/stepshots/main/schema/tour.schema.json";
+
+/// Current major version of the tour source-file format, written to the
+/// `schema` field. Independent of the bundle-manifest version.
+pub const TOUR_FILE_SCHEMA_VERSION: &str = "1";
+
+/// Hints used only by `stepshots tour check` when replaying the tour against
+/// a live app. Stripped by [`TourFile::to_track`] — never served to the player.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TourCheck {
+    /// Value `tour check` types (input advance) or selects (change advance)
+    /// to satisfy this step and move the replay forward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// Path joined to the check base URL and navigated to before resolving
+    /// this step, for steps the replay can't reach through the previous
+    /// step's advance alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+impl TourCheck {
+    /// A check block carrying no hints at all — nothing worth serializing.
+    pub fn is_empty(&self) -> bool {
+        self.value.is_none() && self.path.is_none()
+    }
+}
+
+/// One step of a tour source file: the player's step contract plus optional
+/// validation hints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TourFileStep {
+    /// CSS selector of the element to spotlight (re-resolved against the live DOM).
+    pub selector: String,
+    /// Callout heading.
+    pub title: String,
+    /// Callout body copy.
+    pub body: String,
+    /// How the user advances past this step.
+    pub advance: TourAdvance,
+    /// Text/aria anchors the player falls back to when `selector` misses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<TourFallback>,
+    /// Validation-only hints for `stepshots tour check` (stripped from the
+    /// track served to the player).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<TourCheck>,
+}
+
+impl TourFileStep {
+    /// Project this source step onto the player's runtime contract,
+    /// dropping the validation-only `check` hints.
+    pub fn to_step(&self) -> TourStep {
+        TourStep {
+            selector: self.selector.clone(),
+            title: self.title.clone(),
+            body: self.body.clone(),
+            advance: self.advance.clone(),
+            fallback: self.fallback.clone(),
+        }
+    }
+}
+
+/// A guided-tour source file (`*.tour.json`) — one tour per file, versioned
+/// in the app repo whose DOM it targets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TourFile {
+    /// JSON Schema reference for editor autocomplete and validation.
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<String>,
+    /// Tour file format version. Currently "1".
+    pub schema: String,
+    /// Identity of the tour: registry key in `window.__STEPSHOTS_TOURS`, the
+    /// `?tour=` query-param value, and the upsert key for `tour push`.
+    pub key: String,
+    /// Human-readable tour title, shown in the dashboard.
+    pub title: String,
+    /// Ordered tour steps.
+    pub steps: Vec<TourFileStep>,
+}
+
+impl TourFile {
+    /// Project this source file onto the runtime track consumed by the
+    /// `@stepshots/tour` player, stripping metadata and check hints.
+    pub fn to_track(&self) -> TourTrack {
+        TourTrack {
+            steps: self.steps.iter().map(TourFileStep::to_step).collect(),
+        }
+    }
+
+    /// Build a source file from a projected recording track — the scaffold
+    /// path used by `stepshots tour init --from <bundle>`.
+    pub fn from_track(track: TourTrack, key: String, title: String) -> Self {
+        TourFile {
+            json_schema: Some(TOUR_SCHEMA_URL.to_string()),
+            schema: TOUR_FILE_SCHEMA_VERSION.to_string(),
+            key,
+            title,
+            steps: track
+                .steps
+                .into_iter()
+                .map(|s| TourFileStep {
+                    selector: s.selector,
+                    title: s.title,
+                    body: s.body,
+                    advance: s.advance,
+                    fallback: s.fallback,
+                    check: None,
+                })
+                .collect(),
+        }
     }
 }
 
@@ -1112,5 +1266,87 @@ mod tour_track_tests {
             step_json.get("fallback").is_none(),
             "blurred anchors -> no fallback key in JSON"
         );
+    }
+}
+
+#[cfg(test)]
+mod tour_file_tests {
+    use super::*;
+
+    fn sample_file_json() -> serde_json::Value {
+        serde_json::json!({
+            "$schema": TOUR_SCHEMA_URL,
+            "schema": "1",
+            "key": "onboarding",
+            "title": "Getting started",
+            "steps": [
+                { "selector": "#new-project",
+                  "title": "Create your first project",
+                  "body": "Everything starts with a project.",
+                  "advance": { "type": "click" },
+                  "fallback": { "text": "New project" } },
+                { "selector": "input[name=project-name]",
+                  "title": "Name it",
+                  "body": "Pick something your team will recognize.",
+                  "advance": { "type": "input" },
+                  "check": { "value": "My first project" } }
+            ]
+        })
+    }
+
+    #[test]
+    fn parses_and_round_trips() {
+        let file: TourFile = serde_json::from_value(sample_file_json()).unwrap();
+        assert_eq!(file.key, "onboarding");
+        assert_eq!(file.steps.len(), 2);
+        assert_eq!(
+            file.steps[1].check.as_ref().unwrap().value.as_deref(),
+            Some("My first project")
+        );
+        let round_tripped = serde_json::to_value(&file).unwrap();
+        assert_eq!(round_tripped, sample_file_json());
+    }
+
+    #[test]
+    fn to_track_strips_metadata_and_check_hints() {
+        let file: TourFile = serde_json::from_value(sample_file_json()).unwrap();
+        let track_json = serde_json::to_value(file.to_track()).unwrap();
+        // The runtime track is exactly { steps: [...] } — no key/title/schema,
+        // and no check hints on any step.
+        assert_eq!(
+            track_json.as_object().unwrap().keys().collect::<Vec<_>>(),
+            vec!["steps"]
+        );
+        for step in track_json["steps"].as_array().unwrap() {
+            assert!(step.get("check").is_none(), "check hints must be stripped");
+        }
+        assert_eq!(track_json["steps"][0]["selector"], "#new-project");
+        assert_eq!(track_json["steps"][1]["advance"]["type"], "input");
+    }
+
+    #[test]
+    fn unknown_fields_are_rejected() {
+        // Typos ("tittle") must fail parsing, not silently pass validation.
+        let mut json = sample_file_json();
+        json["steps"][0]["tittle"] = serde_json::json!("oops");
+        assert!(serde_json::from_value::<TourFile>(json).is_err());
+    }
+
+    #[test]
+    fn from_track_scaffolds_a_versioned_source_file() {
+        let track = TourTrack {
+            steps: vec![TourStep {
+                selector: "#go".into(),
+                title: "Go".into(),
+                body: "Click go".into(),
+                advance: TourAdvance::Click,
+                fallback: None,
+            }],
+        };
+        let file = TourFile::from_track(track, "quickstart".into(), "Quickstart".into());
+        assert_eq!(file.json_schema.as_deref(), Some(TOUR_SCHEMA_URL));
+        assert_eq!(file.schema, TOUR_FILE_SCHEMA_VERSION);
+        assert_eq!(file.key, "quickstart");
+        assert!(file.steps[0].check.is_none());
     }
 }

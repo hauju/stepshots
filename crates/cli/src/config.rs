@@ -362,6 +362,7 @@ pub fn sample_config() -> String {
                 url: "/".into(),
                 title: "Getting Started".into(),
                 description: Some("A quick tour of the product.".into()),
+                target: None,
                 steps: vec![
                     StepConfig {
                         action: "click".into(),
@@ -581,6 +582,7 @@ mod tests {
             url: "".into(),
             title: "Test".into(),
             description: None,
+            target: None,
             steps: vec![],
         };
         let errors = validate_tutorial("test", &tutorial);

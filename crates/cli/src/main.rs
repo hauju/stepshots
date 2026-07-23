@@ -72,7 +72,7 @@ enum Commands {
     },
     /// Print the JSON Schema for stepshots.config.json
     Schema,
-    /// Work with live guided-tour tracks derived from recordings
+    /// Create, validate, and check guided-tour source files (*.tour.json)
     Tour {
         #[command(subcommand)]
         command: TourCommands,
@@ -227,8 +227,64 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum TourCommands {
-    /// Export a live guided-tour track (JSON) from a recorded .stepshot bundle,
-    /// for use with the @stepshots/tour player
+    /// Scaffold a guided-tour source file (optionally from a recorded bundle)
+    Init {
+        /// Tour key: the ?tour= URL parameter and registry key
+        key: String,
+
+        /// Project a recorded .stepshot bundle into the scaffold
+        #[arg(long)]
+        from: Option<PathBuf>,
+
+        /// Output file (default: tours/<key>.tour.json)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+
+        /// Overwrite an existing tour file
+        #[arg(long)]
+        force: bool,
+    },
+    /// Validate tour source files (strict parse + lints)
+    Validate {
+        /// Tour files or directories (default: tours/)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
+    },
+    /// Replay tour files against a live app and report selector drift
+    Check {
+        /// Tour files or directories (default: tours/)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
+
+        /// Base URL of the app to replay against (e.g. a staging deploy)
+        #[arg(long)]
+        url: String,
+
+        /// Exit non-zero on: fail (broken steps) or warn (also fallback drift)
+        #[arg(long, value_enum, default_value = "fail")]
+        fail_on: commands::verify::FailOn,
+
+        /// Rewrite each selector-resolved step's fallback anchors from the live DOM
+        #[arg(long)]
+        update_fallbacks: bool,
+
+        /// Persistent browser profile directory (for authenticated apps)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
+    },
+    /// Merge tour files into a window.__STEPSHOTS_TOURS registry script
+    Build {
+        /// Tour files or directories (default: tours/)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
+
+        /// Output script path
+        #[arg(long, short, default_value = "tours.js")]
+        output: PathBuf,
+    },
+    /// Print the JSON Schema for *.tour.json files
+    Schema,
+    /// Deprecated: use `tour init --from <bundle>` or `tour build`
     Export {
         /// Path to the .stepshot bundle
         bundle: PathBuf,
@@ -302,6 +358,40 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             commands::schema::run()?;
         }
         Commands::Tour { command } => match command {
+            TourCommands::Init {
+                key,
+                from,
+                output,
+                force,
+            } => {
+                commands::tour::init(&key, from.as_deref(), output, force, json)?;
+            }
+            TourCommands::Validate { paths } => {
+                commands::tour::validate(&paths, json)?;
+            }
+            TourCommands::Check {
+                paths,
+                url,
+                fail_on,
+                update_fallbacks,
+                profile_dir,
+            } => {
+                commands::tour_check::run(
+                    &paths,
+                    &url,
+                    fail_on,
+                    update_fallbacks,
+                    profile_dir.as_deref(),
+                    json,
+                )
+                .await?;
+            }
+            TourCommands::Build { paths, output } => {
+                commands::tour::build(&paths, &output, json)?;
+            }
+            TourCommands::Schema => {
+                println!("{}", commands::schema::generate_tour()?);
+            }
             TourCommands::Export {
                 bundle,
                 output,

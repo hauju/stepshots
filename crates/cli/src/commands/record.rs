@@ -88,6 +88,11 @@ pub async fn run(
                         tutorial.steps.len()
                     );
                 }
+                if tutorial.target == Some(manifest::RecordingTarget::Tour)
+                    && let Err(e) = super::tour::post_record(key, &output_path, json)
+                {
+                    eprintln!("  tour warning: could not scaffold tour file: {e}");
+                }
 
                 tutorial_outputs.push(TutorialOutput {
                     key: key.to_string(),

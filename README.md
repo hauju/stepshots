@@ -75,6 +75,33 @@ To check demos on a schedule in CI, use the GitHub Action with `command: verify`
 
 The step fails when drift is found and writes a freshness summary to the job summary, plus `output/verify-report.json` for tooling.
 
+### Guided tours
+
+A guided tour is its own text-only asset — a `tours/<key>.tour.json` file you version in the app repo whose DOM it targets — played by [`@stepshots/tour`](packages/tour/) as a live overlay on your real app. A recording is the scaffold, not the source: it contributes the selectors and fallback anchors once, then the tour file is yours to edit.
+
+```sh
+# Scaffold a tour (from scratch, or projecting a recorded bundle)
+stepshots tour init onboarding
+stepshots tour init onboarding --from output/onboarding.stepshot
+
+# Static validation: strict schema + lints, CI-friendly exit codes
+stepshots tour validate
+
+# Live validation: replay the tour headless against a deploy.
+# ok = selector matched · drift = fallback anchor matched · fail = neither
+stepshots tour check --url https://staging.example.com
+
+# Refresh fallback anchors from the live DOM (selector hits only)
+stepshots tour check --url https://staging.example.com --update-fallbacks
+
+# Merge tour files into a window.__STEPSHOTS_TOURS script for script-tag installs
+stepshots tour build -o public/tours.js
+```
+
+Tag a tutorial with `"target": "tour"` in `stepshots.config.json` and `record` warns about interactive steps without a callout (they'd be dropped from the tour) and scaffolds the tour file automatically. `verify` and `tour check` are siblings: one guards your demos, the other your tours.
+
+Tour files get editor autocomplete and validation via their `$schema` entry (`schema/tour.schema.json`).
+
 ### Record logged-in flows
 
 Recordings run in a fresh headless browser, so sites you're normally signed in to appear logged out. To record an authenticated flow, log in once inside a persistent browser profile, then point recordings at it:
@@ -181,15 +208,15 @@ import { StepshotsDemo } from "@stepshots/react";
 
 See [`packages/react/`](packages/react/) or the [React SDK guide](https://stepshots.com/docs/guides/react-sdk) for full props documentation.
 
-## Live Tour Player
+## Guided Tour Player
 
 ```sh
 bun add @stepshots/tour
 ```
 
-A framework-agnostic player that replays a recorded flow as a live guided tour on your real app — spotlighting the next element and advancing on the user's actual clicks and typing. Produce a track with `stepshots tour export`, or let [stepshots.com](https://stepshots.com) host tours for you with a single script tag.
+A framework-agnostic player that runs a guided tour on your real app — spotlighting the next element and advancing on the user's actual clicks and typing. Author tours as `*.tour.json` files (see [Guided tours](#guided-tours)), import them directly with a bundler or emit a registry script with `stepshots tour build`, or let [stepshots.com](https://stepshots.com) host tours for you with a single script tag.
 
-See [`packages/tour/`](packages/tour/) or the [live tours guide](https://stepshots.com/docs/guides/live-tours).
+See [`packages/tour/`](packages/tour/) or the [guided tours guide](https://stepshots.com/docs/guides/live-tours).
 
 ## Embed Examples
 

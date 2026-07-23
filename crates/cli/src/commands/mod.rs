@@ -8,6 +8,7 @@ pub mod record;
 pub mod schema;
 pub mod serve;
 pub mod tour;
+pub mod tour_check;
 pub mod upgrade;
 pub mod upload;
 pub mod verify;

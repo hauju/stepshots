@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TourFile",
+  "description": "A guided-tour source file (`*.tour.json`) — one tour per file, versioned\nin the app repo whose DOM it targets.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "JSON Schema reference for editor autocomplete and validation.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key": {
+      "description": "Identity of the tour: registry key in `window.__STEPSHOTS_TOURS`, the\n`?tour=` query-param value, and the upsert key for `tour push`.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "Tour file format version. Currently \"1\".",
+      "type": "string"
+    },
+    "steps": {
+      "description": "Ordered tour steps.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TourFileStep"
+      }
+    },
+    "title": {
+      "description": "Human-readable tour title, shown in the dashboard.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "key",
+    "title",
+    "steps"
+  ],
+  "$defs": {
+    "TourAdvance": {
+      "description": "How a live-tour step advances to the next. Serializes as `{ \"type\": \"click\" }`.",
+      "oneOf": [
+        {
+          "description": "Advance when the user clicks inside the target element.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "click"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Advance when the user types a non-empty value into the target element.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "input"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Advance when the user changes the target's value (e.g. picks a dropdown option).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "change"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "TourCheck": {
+      "description": "Hints used only by `stepshots tour check` when replaying the tour against\na live app. Stripped by [`TourFile::to_track`] — never served to the player.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Path joined to the check base URL and navigated to before resolving\nthis step, for steps the replay can't reach through the previous\nstep's advance alone.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "Value `tour check` types (input advance) or selects (change advance)\nto satisfy this step and move the replay forward.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "TourFallback": {
+      "description": "Resilient anchors the player falls back to when `selector` no longer matches\nthe live DOM (UI drift). Captured from the target element at record time.",
+      "type": "object",
+      "properties": {
+        "aria": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "TourFileStep": {
+      "description": "One step of a tour source file: the player's step contract plus optional\nvalidation hints.",
+      "type": "object",
+      "properties": {
+        "advance": {
+          "description": "How the user advances past this step.",
+          "$ref": "#/$defs/TourAdvance"
+        },
+        "body": {
+          "description": "Callout body copy.",
+          "type": "string"
+        },
+        "check": {
+          "description": "Validation-only hints for `stepshots tour check` (stripped from the\ntrack served to the player).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TourCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fallback": {
+          "description": "Text/aria anchors the player falls back to when `selector` misses.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TourFallback"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selector": {
+          "description": "CSS selector of the element to spotlight (re-resolved against the live DOM).",
+          "type": "string"
+        },
+        "title": {
+          "description": "Callout heading.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "selector",
+        "title",
+        "body",
+        "advance"
+      ]
+    }
+  }
+}

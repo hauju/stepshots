@@ -26,6 +26,10 @@ pub fn run(force: bool) -> Result<(), CliError> {
     println!(
         "  - `stepshots inspect <url>` lists a page's interactive elements and CSS selectors."
     );
+    println!(
+        "  - Add *.stepshot (and your output dir) to .gitignore — bundles are build artifacts; \
+         the config and *.tour.json files are the git-versioned sources."
+    );
 
     Ok(())
 }
