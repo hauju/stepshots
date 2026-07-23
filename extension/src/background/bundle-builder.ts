@@ -1,5 +1,5 @@
 import { zipSync } from "fflate";
-import type { ElementBounds, Highlight, RecordingState, Viewport } from "../types";
+import type { ElementBounds, Highlight, RecordedStep, RecordingState, Viewport } from "../types";
 
 /** Convert a data URL (image/webp or image/png) to a Uint8Array. */
 function dataUrlToBytes(dataUrl: string): Uint8Array {
@@ -53,6 +53,7 @@ export function buildBundle(
       target_url: step.targetUrl,
       selector: step.selector,
       selector_quality: step.selectorQuality,
+      ...driftAnchors(step),
       text: step.text,
       key: step.key,
       scroll_x: step.scrollX,
@@ -108,6 +109,10 @@ interface ManifestStep {
   target_url?: string;
   selector?: string;
   selector_quality?: string;
+  /** Trimmed text of the target at record time — guided-tour drift anchor. */
+  target_text?: string;
+  /** aria-label of the target at record time — guided-tour drift anchor. */
+  target_aria?: string;
   text?: string;
   key?: string;
   scroll_x?: number;
@@ -116,6 +121,25 @@ interface ManifestStep {
   scene_scroll_y?: number;
   value?: string;
   highlights?: ManifestHighlight[];
+}
+
+/**
+ * Drift anchors for the guided-tour player: the target's recorded text and
+ * aria-label let a tour step keep working when its CSS selector drifts.
+ * Mirrors the CLI recorder's capture (whitespace-collapsed, capped at 120).
+ * Skipped for steps the recorder flagged sensitive, so field contents never
+ * resurface in public tour JSON.
+ */
+function driftAnchors(step: RecordedStep): Pick<ManifestStep, "target_text" | "target_aria"> {
+  if (!step.selector || step.meta?.sensitive) {
+    return {};
+  }
+  const text = step.meta?.elementText?.replace(/\s+/g, " ").trim().slice(0, 120);
+  const aria = step.meta?.ariaLabel;
+  return {
+    ...(text ? { target_text: text } : {}),
+    ...(aria ? { target_aria: aria } : {}),
+  };
 }
 
 function buildManifestHighlight(

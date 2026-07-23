@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { generateStepSummary } from "../../utils/step-summary";
+import type { RecordingState } from "../../types";
 import {
   recordingState,
   sendMessage,
@@ -11,6 +12,67 @@ import {
 
 let cachedJson = "";
 
+const TOUR_SCHEMA_URL =
+  "https://raw.githubusercontent.com/hauju/stepshots/main/schema/tour.schema.json";
+
+/** Recorded action → guided-tour advance kind. Anything else is a setup step. */
+const TOUR_ADVANCE: Record<string, string> = { click: "click", type: "input", select: "change" };
+
+/**
+ * Project the recording into a guided-tour source file (*.tour.json) — the
+ * same convention as `stepshots tour init --from`: a step joins the tour only
+ * when it's interactive (click/type/select), has a selector, and carries a
+ * callout. Drift anchors come from the captured element identity, skipped for
+ * sensitive fields.
+ */
+function buildTourFile(
+  state: RecordingState,
+  title: string,
+): { json: string; included: number; missingCallouts: number } {
+  const steps = [];
+  let missingCallouts = 0;
+  for (const step of state.steps) {
+    const advance = TOUR_ADVANCE[step.action];
+    if (!advance || !step.selector) continue;
+    const body = step.highlight?.callout?.trim();
+    if (!body) {
+      missingCallouts++;
+      continue;
+    }
+    const fallback: { text?: string; aria?: string } = {};
+    if (!step.meta?.sensitive) {
+      const text = step.meta?.elementText?.replace(/\s+/g, " ").trim().slice(0, 120);
+      if (text) fallback.text = text;
+      if (step.meta?.ariaLabel) fallback.aria = step.meta.ariaLabel;
+    }
+    steps.push({
+      selector: step.selector,
+      title: generateStepSummary(step),
+      body,
+      advance: { type: advance },
+      ...(fallback.text || fallback.aria ? { fallback } : {}),
+    });
+  }
+  const key = slugify(title);
+  const file = {
+    $schema: TOUR_SCHEMA_URL,
+    schema: "1",
+    key,
+    title: title || "Untitled",
+    steps,
+  };
+  return { json: JSON.stringify(file, null, 2) + "\n", included: steps.length, missingCallouts };
+}
+
+function slugify(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return slug || "tour";
+}
+
 export function Export() {
   const state = recordingState.value!;
   const [title, setTitle] = useState(state.tutorialTitle || "");
@@ -19,6 +81,7 @@ export function Export() {
   const [vpHeight, setVpHeight] = useState(String(state.viewport.height));
   const [uploading, setUploading] = useState(false);
   const [copyLabel, setCopyLabel] = useState("Copy config");
+  const [tourNote, setTourNote] = useState("");
 
   // Reset upload feedback when steps or viewport change (new state arrives).
   useEffect(() => {
@@ -62,6 +125,26 @@ export function Export() {
       setCopyLabel("Copied!");
       setTimeout(() => setCopyLabel("Copy config"), 1500);
     }
+  };
+
+  const exportTour = () => {
+    const { json, included, missingCallouts } = buildTourFile(state, title.trim() || "Untitled");
+    if (included === 0) {
+      setTourNote(
+        missingCallouts > 0
+          ? "No tour-worthy steps yet — add callout text to your click/type steps in the step list; callouts become the tour's instructions."
+          : "No tour-worthy steps — a tour needs click, type, or select actions.",
+      );
+      return;
+    }
+    const skipped =
+      missingCallouts > 0
+        ? ` ${missingCallouts} interactive step${missingCallouts !== 1 ? "s" : ""} without callout text ${missingCallouts !== 1 ? "were" : "was"} left out.`
+        : "";
+    setTourNote(
+      `Tour file with ${included} step${included !== 1 ? "s" : ""} downloaded — keep it in tours/ in your repo, then run \`stepshots tour check\` and \`stepshots tour push\`.${skipped}`,
+    );
+    downloadJson(json, `${slugify(title.trim() || "Untitled")}.tour.json`);
   };
 
   const upload = async () => {
@@ -252,7 +335,15 @@ export function Export() {
             <button class="btn" onClick={copyConfig}>
               {copyLabel}
             </button>
+            <button class="btn" onClick={exportTour}>
+              Download tour file
+            </button>
           </div>
+          {tourNote && <p class="meta">{tourNote}</p>}
+          <p class="meta">
+            The tour file (.tour.json) runs this flow as guided onboarding on your own app —
+            steps with callout text become the tour's instructions.
+          </p>
         </div>
       </details>
       <button class="btn" onClick={startNew}>
