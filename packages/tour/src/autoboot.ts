@@ -88,6 +88,9 @@ function begin(
 
 /** Attribute that turns any element into a "show me" launcher for a track. */
 const TRIGGER_ATTR = "data-stepshots-tour-trigger";
+/** Optional companion: navigate here first, then start the tour on arrival —
+ * for flows that aren't reachable from the page hosting the trigger. */
+const TRIGGER_URL_ATTR = "data-stepshots-tour-url";
 
 /**
  * Zero-config entry point for the `<script>` embed. In priority order it:
@@ -100,7 +103,9 @@ const TRIGGER_ATTR = "data-stepshots-tour-trigger";
  * `data-stepshots-tour-trigger="<key>"` starts that track on click — the
  * show-me-instead-of-tell-me primitive for FAQ items, help menus, and empty
  * states. Delegated, so triggers rendered later (SPA views, accordions) work
- * without re-binding.
+ * without re-binding. Add `data-stepshots-tour-url="<url>"` when the flow
+ * starts on a different page: the click stashes the key and navigates there;
+ * the destination page's `autoBoot` picks the stash up and starts the tour.
  *
  * `tracks` defaults to `window.__STEPSHOTS_TOURS`. Returns a handle when a tour
  * starts synchronously (the param path), else null (first-run starts async).
@@ -125,8 +130,23 @@ export function autoBoot(opts: AutoBootOptions = {}): TourHandle | null {
     const el = target?.closest(`[${TRIGGER_ATTR}]`);
     if (!el) return;
     const key = el.getAttribute(TRIGGER_ATTR);
+    if (!key) return;
+    const jumpUrl = el.getAttribute(TRIGGER_URL_ATTR);
+    if (jumpUrl) {
+      // Flow starts elsewhere: stash the key and go. The destination page's
+      // autoBoot resolves the stash (same mechanism as an SPA-nav resume) and
+      // starts the tour there — no registry lookup here, since this page may
+      // not even carry the destination's tracks.
+      e.preventDefault();
+      try {
+        sessionStorage.setItem(storageKey, key);
+        sessionStorage.removeItem(resumeKey);
+      } catch {}
+      window.location.assign(jumpUrl);
+      return;
+    }
     const live = opts.tracks ?? window.__STEPSHOTS_TOURS ?? {};
-    if (!key || !live[key]) return;
+    if (!live[key]) return;
     e.preventDefault();
     try {
       sessionStorage.setItem(storageKey, key);

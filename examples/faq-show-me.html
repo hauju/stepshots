@@ -15,6 +15,9 @@
       window.__STEPSHOTS_TOURS + StepshotsTour.autoBoot(). With hosted tours,
       load https://stepshots.com/tour.js instead and use your tour IDs from
       `stepshots tour push` — no autoBoot call needed.
+    - If the flow starts on a different page, add
+      data-stepshots-tour-url="/that/page" to the trigger: the click navigates
+      there first and the tour starts on arrival (both pages need the snippet).
     - Requires @stepshots/tour >= 0.2.0.
 
     HOW TO USE:

@@ -586,6 +586,46 @@ await scenario("show-me trigger starts a registry track on click", async () => {
   );
 });
 
+await scenario("jump trigger stashes the key, navigates, and starts on arrival", async () => {
+  // Page A: the FAQ page. The flow starts elsewhere, so the trigger carries a URL.
+  const pageA = loadPage();
+  const trigger = pageA.document.createElement("button");
+  trigger.setAttribute("data-stepshots-tour-trigger", "faq-demo");
+  trigger.setAttribute("data-stepshots-tour-url", "/settings");
+  pageA.document.body.appendChild(trigger);
+  // Page A doesn't even need the track — the destination owns it.
+  pageA.StepshotsTour.autoBoot();
+  // autoBoot defers binding to DOMContentLoaded when the document is still
+  // loading (jsdom reports "loading" here) — yield once before clicking.
+  await delay();
+  trigger.dispatchEvent(new pageA.MouseEvent("click", { bubbles: true }));
+  await delay();
+  check(
+    !pageA.document.querySelector("[data-stepshots-tour]"),
+    "no tour starts on the page hosting a jump trigger",
+  );
+  check(
+    pageA.sessionStorage.getItem("stepshots_active_tour") === "faq-demo",
+    "the jump stashes the tour key for the destination page",
+  );
+  check(
+    pageA.sessionStorage.getItem("stepshots_active_tour:step") === null,
+    "the jump clears any stale step index — arrival starts at step 0",
+  );
+
+  // Page B: the destination after navigation (fresh page, same sessionStorage).
+  const pageB = loadPage({ stepshots_active_tour: "faq-demo" });
+  pageB.__STEPSHOTS_TOURS = { "faq-demo": twoStep };
+  pageB.StepshotsTour.autoBoot();
+  await delay();
+  const host = pageB.document.querySelector("[data-stepshots-tour]");
+  check(!!host, "the destination page starts the stashed tour on boot");
+  check(
+    host?.shadowRoot?.querySelector("h4")?.textContent === "Step one",
+    "the jumped tour begins at step 0",
+  );
+});
+
 // ---------------------------------------------------------------------------
 
 console.log(`\n${"-".repeat(48)}`);

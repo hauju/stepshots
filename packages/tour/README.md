@@ -92,6 +92,18 @@ instead of tell:
 
 Bound once by `autoBoot` via event delegation, so triggers rendered later (SPA
 views, accordions) work without re-binding. A click always starts fresh at step 0.
+
+When the flow starts on a different page, add `data-stepshots-tour-url`: the
+click stashes the tour and navigates there; the destination page's `autoBoot`
+starts it on arrival (both pages need the registry + `autoBoot`):
+
+```html
+<button
+  data-stepshots-tour-trigger="invite-teammate"
+  data-stepshots-tour-url="/settings/team"
+>Show me</button>
+```
+
 See `examples/faq-show-me.html` in the repo for a complete page.
 
 ## API
