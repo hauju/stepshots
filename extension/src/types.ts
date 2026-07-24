@@ -110,6 +110,8 @@ export interface RecordingState {
   steps: RecordedStep[];
   viewport: Viewport;
   recordingTabId?: number;
+  /** Recording a guided tour: nudge callouts per interactive step, tour-first export. */
+  tourMode?: boolean;
 }
 
 export const DEFAULT_STATE: RecordingState = {
@@ -122,6 +124,7 @@ export const DEFAULT_STATE: RecordingState = {
   startPath: "",
   steps: [],
   viewport: { width: 1280, height: 800, deviceScaleFactor: 1 },
+  tourMode: false,
 };
 
 export interface Settings {

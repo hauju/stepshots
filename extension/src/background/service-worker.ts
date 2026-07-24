@@ -257,6 +257,7 @@ async function handleMessage(
         steps: [],
         viewport: actualViewport,
         recordingTabId: tab.id,
+        tourMode: !!message.tourMode,
       };
       await saveState();
       broadcastState();

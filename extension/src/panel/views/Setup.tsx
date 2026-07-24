@@ -4,6 +4,7 @@ import { recordingState, sendMessage, setupError, slugify, tabInfo, viewOverride
 export function Setup() {
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
+  const [tourMode, setTourMode] = useState(false);
   const [guidanceOpen, setGuidanceOpen] = useState(false);
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export function Setup() {
       tutorialName: slugify(finalTitle),
       tutorialTitle: finalTitle,
       tutorialDescription: desc.trim(),
+      tourMode,
     });
 
     if (state && !("error" in state)) {
@@ -88,6 +90,28 @@ export function Setup() {
         onInput={(e) => setDesc((e.target as HTMLInputElement).value)}
         placeholder="e.g. How to create an account"
       />
+      <label>Recording for</label>
+      <div class="position-picker">
+        <button
+          class={`position-btn ${!tourMode ? "active" : ""}`}
+          onClick={() => setTourMode(false)}
+        >
+          Demo
+        </button>
+        <button
+          class={`position-btn ${tourMode ? "active" : ""}`}
+          onClick={() => setTourMode(true)}
+        >
+          Guided tour
+        </button>
+      </div>
+      {tourMode && (
+        <p class="meta">
+          Record from the state your users start in, and give every click/type a callout — callouts
+          become the tour's on-screen instructions. You'll get a <code>.tour.json</code> file to
+          keep in your repo.
+        </p>
+      )}
       {setupError.value && <p class="record-status error">{setupError.value}</p>}
       <button class="btn btn-primary" onClick={start}>
         Start Recording

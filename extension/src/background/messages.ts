@@ -6,6 +6,7 @@ export interface StartRecordingMessage {
   tutorialName: string;
   tutorialTitle: string;
   tutorialDescription: string;
+  tourMode?: boolean;
 }
 
 export interface StopRecordingMessage {

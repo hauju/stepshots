@@ -116,6 +116,7 @@ export function Recording() {
           <span class={`recording-dot ${state.isPaused ? "recording-dot-paused" : ""}`}></span>
           <span>{state.isPaused ? "Paused" : "Recording"}</span>
         </div>
+        {state.tourMode && <span class="step-meta-chip">Guided tour</span>}
         <span class="badge">
           {state.steps.length} action{state.steps.length !== 1 ? "s" : ""}
         </span>
@@ -182,6 +183,15 @@ function StepItem({ step, index, onDragStart, onDelete }: StepItemProps) {
   const isSensitive = !!step.meta?.sensitive;
   const captureOnly = !!step.meta?.captureOnly;
   const hasHighlight = !!step.highlight?.callout;
+  // Tour-mode nudges: mirror the tour projection's drop rules (Export.tsx) so
+  // the user fixes steps while they can still edit them, not at export time.
+  const tourMode = !!recordingState.value?.tourMode;
+  const isTourInteractive = ["click", "type", "select"].includes(step.action);
+  const needsCallout = tourMode && isTourInteractive && !hasHighlight;
+  const fragileSelector =
+    tourMode &&
+    isTourInteractive &&
+    (step.selectorQuality === "fragile" || step.selectorQuality === "fallback");
   const availableActions = DEFAULT_ACTIONS.includes(step.action)
     ? DEFAULT_ACTIONS
     : [...DEFAULT_ACTIONS, step.action];
@@ -243,6 +253,22 @@ function StepItem({ step, index, onDragStart, onDelete }: StepItemProps) {
             &#9998;
           </span>
         )}
+        {needsCallout && (
+          <span
+            class="step-warn-chip"
+            title="This step will be left out of the tour — add callout text"
+          >
+            callout?
+          </span>
+        )}
+        {fragileSelector && !needsCallout && (
+          <span
+            class="step-warn-chip"
+            title="Fragile selector — the tour resolves it on the live page, so it may drift"
+          >
+            fragile
+          </span>
+        )}
         <button
           class="step-delete"
           title="Delete step"
@@ -280,6 +306,12 @@ function StepItem({ step, index, onDragStart, onDelete }: StepItemProps) {
                   setDraft({ ...draft, selector: (e.target as HTMLInputElement).value })
                 }
               />
+              {fragileSelector && (
+                <p class="meta">
+                  Fragile selector — the tour re-resolves it on your live page. An id or
+                  data-testid on this element makes the tour drift-proof.
+                </p>
+              )}
             </>
           )}
           {showText && (
@@ -345,11 +377,18 @@ function StepItem({ step, index, onDragStart, onDelete }: StepItemProps) {
           <input
             type="text"
             value={draft.callout}
-            placeholder="e.g. Click the submit button"
+            placeholder={
+              tourMode ? "e.g. Click New project to create it" : "e.g. Click the submit button"
+            }
             onInput={(e) =>
               setDraft({ ...draft, callout: (e.target as HTMLInputElement).value })
             }
           />
+          {needsCallout && (
+            <p class="meta">
+              Tours only include interactive steps with a callout — write it as an instruction.
+            </p>
+          )}
           <label>Position</label>
           <div class="position-picker">
             {(["top", "bottom", "left", "right"] as const).map((p) => (

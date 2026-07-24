@@ -392,6 +392,18 @@ input:focus {
   color: var(--brand-primary);
 }
 
+/* Tour-mode nudge on a step that would be dropped from (or drift out of) the tour. */
+.step-warn-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+  flex-shrink: 0;
+}
+
 .drag-handle {
   cursor: grab;
   color: #ccc;

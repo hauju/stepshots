@@ -219,6 +219,10 @@ export function Export() {
 
   const status = uploadStatus.value;
   const result = uploadResult.value;
+  // Tour-first finalize: show live eligibility so missing callouts are visible
+  // before downloading (steps are only editable back in the Recording view).
+  const tourMode = !!state.tourMode;
+  const tourEligibility = tourMode ? buildTourFile(state, title.trim() || "Untitled") : null;
 
   return (
     <div>
@@ -259,12 +263,36 @@ export function Export() {
           })
         )}
       </div>
-      <p class="panel-intro panel-intro-compact">
-        Recommended: upload to Stepshots, then review callouts and sharing in the editor.
-      </p>
-      <button class="btn btn-primary btn-lg" onClick={upload} disabled={uploading || !!result}>
-        Upload to Stepshots
-      </button>
+      {tourMode && tourEligibility ? (
+        <>
+          <p class="panel-intro panel-intro-compact">
+            Recommended: download the tour file and keep it in <code>tours/</code> in your repo,
+            then run <code>stepshots tour push</code>.
+          </p>
+          <p class="meta">
+            {tourEligibility.included} step{tourEligibility.included !== 1 ? "s" : ""} make the tour
+            {tourEligibility.missingCallouts > 0
+              ? ` · ${tourEligibility.missingCallouts} interactive step${tourEligibility.missingCallouts !== 1 ? "s" : ""} missing callout text will be left out`
+              : ""}
+          </p>
+          <button class="btn btn-primary btn-lg" onClick={exportTour}>
+            Download tour file
+          </button>
+          {tourNote && <p class="meta">{tourNote}</p>}
+          <button class="btn" onClick={upload} disabled={uploading || !!result}>
+            Upload demo to Stepshots
+          </button>
+        </>
+      ) : (
+        <>
+          <p class="panel-intro panel-intro-compact">
+            Recommended: upload to Stepshots, then review callouts and sharing in the editor.
+          </p>
+          <button class="btn btn-primary btn-lg" onClick={upload} disabled={uploading || !!result}>
+            Upload to Stepshots
+          </button>
+        </>
+      )}
       {result && (
         <div class="upload-result">
           <p class="upload-success-text">Upload complete.</p>
@@ -335,15 +363,19 @@ export function Export() {
             <button class="btn" onClick={copyConfig}>
               {copyLabel}
             </button>
-            <button class="btn" onClick={exportTour}>
-              Download tour file
-            </button>
+            {!tourMode && (
+              <button class="btn" onClick={exportTour}>
+                Download tour file
+              </button>
+            )}
           </div>
-          {tourNote && <p class="meta">{tourNote}</p>}
-          <p class="meta">
-            The tour file (.tour.json) runs this flow as guided onboarding on your own app —
-            steps with callout text become the tour's instructions.
-          </p>
+          {!tourMode && tourNote && <p class="meta">{tourNote}</p>}
+          {!tourMode && (
+            <p class="meta">
+              The tour file (.tour.json) runs this flow as guided onboarding on your own app —
+              steps with callout text become the tour's instructions.
+            </p>
+          )}
         </div>
       </details>
       <button class="btn" onClick={startNew}>
