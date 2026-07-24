@@ -105,6 +105,18 @@ stepshots tour push
 
 Tag a tutorial with `"target": "tour"` in `stepshots.config.json` and `record` warns about interactive steps without a callout (they'd be dropped from the tour) and scaffolds the tour file automatically. `verify` and `tour check` are siblings: one guards your demos, the other your tours.
 
+To run the tour check in CI, use the GitHub Action with `command: tour-check`:
+
+```yaml
+- uses: hauju/stepshots@main
+  with:
+    command: tour-check
+    url: https://staging.example.com
+    fail-on: warn
+```
+
+The step fails when a tour breaks, writes a tour freshness summary to the job summary, and leaves `output/tour-check-report.json` for tooling.
+
 Tour files get editor autocomplete and validation via their `$schema` entry (`schema/tour.schema.json`).
 
 ### Record logged-in flows
@@ -219,7 +231,7 @@ See [`packages/react/`](packages/react/) or the [React SDK guide](https://stepsh
 bun add @stepshots/tour
 ```
 
-A framework-agnostic player that runs a guided tour on your real app — spotlighting the next element and advancing on the user's actual clicks and typing. Author tours as `*.tour.json` files (see [Guided tours](#guided-tours)), import them directly with a bundler or emit a registry script with `stepshots tour build`, or let [stepshots.com](https://stepshots.com) host tours for you with a single script tag.
+A framework-agnostic player that runs a guided tour on your real app — spotlighting the next element and advancing on the user's actual clicks and typing. Author tours as `*.tour.json` files (see [Guided tours](#guided-tours)), import them directly with a bundler or emit a registry script with `stepshots tour build`, or let [stepshots.com](https://stepshots.com) host tours for you with a single script tag. It also ships `createChecklist`, an onboarding checklist widget that bundles your activation tours into a persistent "Getting started · 2/5" launcher and checks items off as their tours complete.
 
 See [`packages/tour/`](packages/tour/) or the [guided tours guide](https://stepshots.com/docs/guides/live-tours).
 

@@ -1,12 +1,12 @@
 name: "Stepshots Record"
-description: "Record and verify interactive product demos with Stepshots CLI"
+description: "Record, verify, and tour-check interactive product demos with Stepshots CLI"
 branding:
   icon: "camera"
   color: "gray-dark"
 
 inputs:
   command:
-    description: "What to run: record (capture bundles) or verify (drift check, writes no bundles)"
+    description: "What to run: record (capture bundles), verify (drift check, writes no bundles), or tour-check (replay tour files against a live deploy)"
     required: false
     default: "record"
   config:
@@ -17,13 +17,23 @@ inputs:
     description: "Comma-separated tutorial keys to record or verify (default: all)"
     required: false
   output:
-    description: "Output directory for .stepshot bundles (record) or failure screenshots and the report (verify)"
+    description: "Output directory for .stepshot bundles (record) or failure screenshots and the report (verify, tour-check)"
     required: false
     default: "output"
   fail-on:
-    description: "Verify only: fail the step on 'fail' (broken steps) or 'warn' (also annotation drift)"
+    description: "verify/tour-check: fail the step on 'fail' (broken steps) or 'warn' (also annotation or fallback-anchor drift)"
     required: false
     default: "fail"
+  url:
+    description: "tour-check only: base URL of the deploy to replay tours against (required)"
+    required: false
+  tours:
+    description: "tour-check only: comma-separated tour files or directories to check (default: tours/)"
+    required: false
+  update-fallbacks:
+    description: "tour-check only: refresh each step's text/aria fallback anchors from the live DOM and rewrite the tour files (commit the changes in a later step)"
+    required: false
+    default: "false"
   upload:
     description: "Upload bundles after recording"
     required: false
@@ -51,8 +61,8 @@ outputs:
     description: "Newline-separated list of recorded .stepshot files (record command only)"
     value: ${{ steps.record.outputs.bundles }}
   report:
-    description: "Path to the verify JSON report (verify command only)"
-    value: ${{ steps.verify.outputs.report }}
+    description: "Path to the JSON report (verify and tour-check commands only)"
+    value: ${{ steps.verify.outputs.report || steps.tour_check.outputs.report }}
 
 runs:
   using: "composite"
@@ -144,6 +154,68 @@ runs:
                 "- ❌ `\(.key)` — " + ((.error // ([.steps[] | select(.status == "fail")][0])) | "\(.message)\n  - hint: \(.hint)")
               elif .status == "warn" then
                 "- ⚠️ `\(.key)` — \(.annotation_warnings | length) annotation(s) drifted"
+              else
+                "- ✅ `\(.key)` — ok"
+              end' "$REPORT"
+          } >> "$GITHUB_STEP_SUMMARY"
+        else
+          # The CLI failed before producing a report (config/browser error) —
+          # surface the error JSON in the log.
+          cat "$REPORT"
+        fi
+
+        exit "$EXIT"
+
+    - name: Check guided tours
+      if: inputs.command == 'tour-check'
+      id: tour_check
+      shell: bash
+      env:
+        INPUT_URL: ${{ inputs.url }}
+        INPUT_TOURS: ${{ inputs.tours }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_UPDATE_FALLBACKS: ${{ inputs.update-fallbacks }}
+      run: |
+        if [ -z "$INPUT_URL" ]; then
+          echo "::error::the 'url' input is required when command is tour-check"
+          exit 1
+        fi
+
+        ARGS=(--url "$INPUT_URL" --fail-on "$INPUT_FAIL_ON")
+        if [ "$INPUT_UPDATE_FALLBACKS" = "true" ]; then
+          ARGS+=(--update-fallbacks)
+        fi
+
+        if [ -n "$INPUT_TOURS" ]; then
+          IFS=',' read -ra TOURS <<< "$INPUT_TOURS"
+          for t in "${TOURS[@]}"; do
+            trimmed="${t#"${t%%[![:space:]]*}"}"
+            trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+            ARGS+=("$trimmed")
+          done
+        fi
+
+        mkdir -p "$INPUT_OUTPUT"
+        REPORT="$INPUT_OUTPUT/tour-check-report.json"
+
+        EXIT=0
+        stepshots tour check "${ARGS[@]}" --json > "$REPORT" || EXIT=$?
+        echo "report=$REPORT" >> "$GITHUB_OUTPUT"
+
+        if jq -e '.summary' "$REPORT" > /dev/null 2>&1; then
+          {
+            echo "## Tour freshness"
+            jq -r '"\(.summary.ok) ok · \(.summary.drift) drifted · \(.summary.fail) broken (against \(.url))"' "$REPORT"
+            echo ""
+            jq -r '.tours[] |
+              ([.steps[] | select(.status == "fail")] | length) as $fails |
+              ([.steps[] | select(.status == "drift")] | length) as $drifts |
+              if $fails > 0 then
+                ([.steps[] | select(.status == "fail")][0]) as $s |
+                "- ❌ `\(.key)` — step \($s.index + 1) (\($s.title)) failed" + (if $s.detail then ": \($s.detail)" else "" end)
+              elif $drifts > 0 then
+                "- ⚠️ `\(.key)` — \($drifts) step(s) resolved by fallback anchor (selector drift)"
               else
                 "- ✅ `\(.key)` — ok"
               end' "$REPORT"
