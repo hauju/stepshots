@@ -120,9 +120,9 @@ export interface FirstRunTrigger {
   key: string;
   /** CSS selector whose appearance signals first-run (watched until it mounts). */
   marker: string;
-  /** localStorage key recording that the tour was offered, so it never auto-starts again (default: `stepshots_tour_seen:<key>`). */
+  /** localStorage key recording that the offer was answered — or that the tour auto-started, when no intro is configured — so it never auto-offers again (default: `stepshots_tour_seen:<key>`). */
   seenKey?: string;
-  /** When set, the marker shows this consent card instead of starting the tour outright — the tour only starts if the user accepts. Declining (button or Escape) marks the tour seen, so it is never offered again. */
+  /** When set, the marker shows this consent card instead of starting the tour outright — the tour only starts if the user accepts. Answering (accept, decline, or Escape) marks the tour seen, so it is never offered again; a card removed by anything else (e.g. a host-app hydration race) re-offers on the next page load. */
   intro?: FirstRunIntro;
 }
 

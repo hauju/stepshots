@@ -176,9 +176,6 @@ export function autoBoot(opts: AutoBootOptions = {}): TourHandle | null {
     if (!seen(seenKey)) {
       waitForSelector(fr.marker, () => {
         if (seen(seenKey)) return;
-        // Mark at offer time — accepted, declined, or started, it never
-        // auto-offers again. sessionStorage resumes across a mid-tour reload.
-        markSeen(seenKey);
         const start = () => {
           try {
             sessionStorage.setItem(storageKey, fr.key);
@@ -187,10 +184,17 @@ export function autoBoot(opts: AutoBootOptions = {}): TourHandle | null {
         };
         if (fr.intro) {
           // Consent first: the tour only dims the screen if the user asks it to.
+          // Mark seen when the user ANSWERS (accept, decline, or Escape) — not
+          // at offer time. If the host app's renderer removes the card before
+          // it is answered (hydration races), the next page load re-offers
+          // instead of silently losing the tour forever.
           showIntro(fr.intro, opts, (accepted) => {
+            markSeen(seenKey);
             if (accepted) start();
           });
         } else {
+          // No consent step: auto-starting IS the answer.
+          markSeen(seenKey);
           start();
         }
       });

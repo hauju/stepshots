@@ -460,11 +460,12 @@ await scenario("firstRun intro: consent card gates the auto-started tour", async
   check(shadow.querySelector(".dismiss").textContent === "Not now", "dismiss button uses the provided label");
   check(shadow.querySelector(".card").getAttribute("role") === "dialog", 'intro card has role="dialog"');
   check(window.document.querySelector("[data-stepshots-tour]") === null, "tour does NOT start while the intro is open");
-  check(window.localStorage.getItem("stepshots_tour_seen:welcome") === "1", "the offer itself marks the tour seen");
+  check(window.localStorage.getItem("stepshots_tour_seen:welcome") === null, "an unanswered offer does NOT mark the tour seen");
   check(events.length === 0, "no tour events while the intro is open");
 
   shadow.querySelector(".start").click();
   check(window.document.querySelector("[data-stepshots-intro]") === null, "accepting removes the intro card");
+  check(window.localStorage.getItem("stepshots_tour_seen:welcome") === "1", "answering marks the tour seen");
   check(events.join(",") === "start,step:0", "accepting starts the tour at step 0");
   check(window.sessionStorage.getItem("stepshots_active_tour") === "welcome", "accepting stashes the active tour key");
 });
@@ -503,6 +504,28 @@ await scenario("firstRun intro: Escape declines", async () => {
   window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   check(window.document.querySelector("[data-stepshots-intro]") === null, "Escape removes the intro card");
   check(window.document.querySelector("[data-stepshots-tour]") === null, "Escape does not start the tour");
+  check(window.localStorage.getItem("stepshots_tour_seen:welcome") === "1", "Escape is an answer — marks the tour seen");
+});
+
+await scenario("firstRun intro: a card removed without an answer re-offers on the next boot", async () => {
+  // Host-app hydration races can remove the body-appended intro before the user
+  // answers. That must NOT burn the once-per-browser offer.
+  const window = loadPage();
+  window.StepshotsTour.autoBoot({
+    tracks: { welcome: twoStep },
+    firstRun: { key: "welcome", marker: "#btn1", intro: { title: "Welcome", body: "Tour?" } },
+  });
+  await delay();
+  const introHost = window.document.querySelector("[data-stepshots-intro]");
+  check(!!introHost, "intro card is open");
+  introHost.remove(); // simulate the host renderer eating the card
+  check(window.localStorage.getItem("stepshots_tour_seen:welcome") === null, "an eaten card leaves the tour unseen");
+  window.StepshotsTour.autoBoot({
+    tracks: { welcome: twoStep },
+    firstRun: { key: "welcome", marker: "#btn1", intro: { title: "Welcome", body: "Tour?" } },
+  });
+  await delay();
+  check(!!window.document.querySelector("[data-stepshots-intro]"), "the next boot re-offers the consent card");
 });
 
 await scenario("firstRun without intro still auto-starts immediately", async () => {
