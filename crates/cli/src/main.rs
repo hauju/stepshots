@@ -110,6 +110,28 @@ enum Commands {
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
     },
+    /// Amend a .stepshot bundle with manually captured steps (append, insert,
+    /// or replace) — for flows that can't be re-recorded
+    Patch {
+        /// Path to the .stepshot bundle to modify in place
+        bundle: PathBuf,
+
+        /// Replace step N's screenshot (1-based), keeping its metadata and overlays
+        #[arg(long, value_name = "N", conflicts_with = "at")]
+        replace: Option<usize>,
+
+        /// Insert captured steps starting at position N (1-based); omit to append
+        #[arg(long, value_name = "N")]
+        at: Option<usize>,
+
+        /// URL to open first (default: inferred from the bundle)
+        #[arg(long)]
+        url: Option<String>,
+
+        /// Persistent browser profile directory (for authenticated pages)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
+    },
     /// Verify demos still match the live app (replays steps, writes no bundle)
     Verify {
         /// Tutorials to verify (by key). Verifies all if omitted.
@@ -503,6 +525,16 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 profile_dir.as_deref(),
             )
             .await?;
+        }
+        Commands::Patch {
+            bundle,
+            replace,
+            at,
+            url,
+            profile_dir,
+        } => {
+            commands::patch::run(&bundle, replace, at, url.as_deref(), profile_dir.as_deref())
+                .await?;
         }
         Commands::Verify {
             tutorials,
