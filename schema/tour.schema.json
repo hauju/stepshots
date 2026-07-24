@@ -15,6 +15,13 @@
       "description": "Identity of the tour: registry key in `window.__STEPSHOTS_TOURS`, the\n`?tour=` query-param value, and the upsert key for `tour push`.",
       "type": "string"
     },
+    "locale": {
+      "description": "Language tag of a translated variant (e.g. \"de\", \"fr-CA\"), absent on\nthe default-locale file. Variants share their base file's `key` —\nidentity is (key, locale) — and by convention live next to it as\n`tours/<key>.<locale>.tour.json`. `tour build --locale` picks the\nmatching variant per key, falling back to the base.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "schema": {
       "description": "Tour file format version. Currently \"1\".",
       "type": "string"

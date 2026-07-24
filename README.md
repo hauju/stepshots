@@ -101,6 +101,15 @@ stepshots tour build -o public/tours.js
 stepshots tour push
 ```
 
+Tours localize like any other file in your repo. `tour init onboarding --locale de`
+scaffolds `tours/onboarding.de.tour.json` from the base file — translate the
+strings, leave the structure. `tour validate` fails CI when a translation falls
+out of sync with its base (step count drift), and `tour build --locale de`
+emits a registry that prefers `de` variants and falls back to the base per
+tour. Run `tour check --url <localized-staging> --update-fallbacks` on a
+variant to capture the localized text anchors. Hosted tours serve the default
+locale; `push` skips variants.
+
 `push` is one-way: your git files stay the source of truth, and pushing overwrites the hosted copy. Hosted tours get anonymous run analytics in the dashboard.
 
 Tag a tutorial with `"target": "tour"` in `stepshots.config.json` and `record` warns about interactive steps without a callout (they'd be dropped from the tour) and scaffolds the tour file automatically. `verify` and `tour check` are siblings: one guards your demos, the other your tours.

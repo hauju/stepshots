@@ -236,7 +236,12 @@ enum TourCommands {
         #[arg(long)]
         from: Option<PathBuf>,
 
-        /// Output file (default: tours/<key>.tour.json)
+        /// Scaffold a translated variant (e.g. "de") — copies the base file's
+        /// structure when tours/<key>.tour.json exists
+        #[arg(long)]
+        locale: Option<String>,
+
+        /// Output file (default: tours/<key>[.<locale>].tour.json)
         #[arg(long, short)]
         output: Option<PathBuf>,
 
@@ -281,6 +286,11 @@ enum TourCommands {
         /// Output script path
         #[arg(long, short, default_value = "tours.js")]
         output: PathBuf,
+
+        /// Build a localized registry: pick each key's <locale> variant,
+        /// falling back to the default-locale file
+        #[arg(long)]
+        locale: Option<String>,
     },
     /// Push tour files to Stepshots hosting (upsert by key; git stays canonical)
     Push {
@@ -379,10 +389,18 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             TourCommands::Init {
                 key,
                 from,
+                locale,
                 output,
                 force,
             } => {
-                commands::tour::init(&key, from.as_deref(), output, force, json)?;
+                commands::tour::init(
+                    &key,
+                    from.as_deref(),
+                    locale.as_deref(),
+                    output,
+                    force,
+                    json,
+                )?;
             }
             TourCommands::Validate { paths } => {
                 commands::tour::validate(&paths, json)?;
@@ -404,8 +422,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 )
                 .await?;
             }
-            TourCommands::Build { paths, output } => {
-                commands::tour::build(&paths, &output, json)?;
+            TourCommands::Build {
+                paths,
+                output,
+                locale,
+            } => {
+                commands::tour::build(&paths, &output, locale.as_deref(), json)?;
             }
             TourCommands::Push {
                 paths,

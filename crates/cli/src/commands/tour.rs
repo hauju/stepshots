@@ -141,10 +141,29 @@ pub async fn push(
     let client = reqwest::Client::new();
     let server = server_url.trim_end_matches('/');
     let mut pushed: Vec<serde_json::Value> = Vec::new();
+    let mut skipped: Vec<serde_json::Value> = Vec::new();
 
     for path in &files {
         let file = load_tour_file(path)
             .map_err(|e| CliError::Config(format!("{}: {e}", path.display())))?;
+        // Hosted tours serve the default locale; a variant pushed under the
+        // same key would overwrite it. Localized registries are self-hosted
+        // via `tour build --locale`.
+        if let Some(locale) = &file.locale {
+            if !json {
+                println!(
+                    "Skipped \"{}\" [{locale}] — hosted tours serve the default locale; build a \
+                     localized registry with `stepshots tour build --locale {locale}`",
+                    file.key
+                );
+            }
+            skipped.push(serde_json::json!({
+                "path": path.display().to_string(),
+                "key": file.key,
+                "locale": locale,
+            }));
+            continue;
+        }
         let track = file.to_track();
         if track.steps.is_empty() {
             return Err(CliError::Config(format!(
@@ -206,6 +225,7 @@ pub async fn push(
             "command": "tour push",
             "server": server,
             "tours": pushed,
+            "skipped": skipped,
         });
         println!(
             "{}",
@@ -236,10 +256,13 @@ async fn push_error(key: &str, resp: reqwest::Response) -> CliError {
 
 /// Scaffold a guided-tour source file at `tours/<key>.tour.json` (or `output`).
 /// With `from`, projects the recorded bundle once — after that the tour file is
-/// independent of the recording.
+/// independent of the recording. With `locale`, scaffolds a translated variant
+/// at `tours/<key>.<locale>.tour.json`, copying the base file's structure when
+/// it exists so only the strings need translating.
 pub fn init(
     key: &str,
     from: Option<&Path>,
+    locale: Option<&str>,
     output: Option<PathBuf>,
     force: bool,
     json: bool,
@@ -251,8 +274,17 @@ pub fn init(
                 .into(),
         ));
     }
-    let out_path =
-        output.unwrap_or_else(|| PathBuf::from(format!("tours/{key}{TOUR_FILE_SUFFIX}")));
+    if let Some(tag) = locale
+        && !valid_locale(tag)
+    {
+        return Err(CliError::Config(format!(
+            "locale \"{tag}\" is not a language tag (expected e.g. \"de\" or \"fr-CA\")"
+        )));
+    }
+    let out_path = output.unwrap_or_else(|| match locale {
+        Some(tag) => PathBuf::from(format!("tours/{key}.{tag}{TOUR_FILE_SUFFIX}")),
+        None => PathBuf::from(format!("tours/{key}{TOUR_FILE_SUFFIX}")),
+    });
     if out_path.exists() && !force {
         return Err(CliError::Config(format!(
             "{} already exists. Use --force to overwrite.",
@@ -261,7 +293,10 @@ pub fn init(
     }
 
     let title = humanize_key(key);
-    let file = match from {
+    let base_path = PathBuf::from(format!("tours/{key}{TOUR_FILE_SUFFIX}"));
+    // Track where the scaffold came from for the follow-up hints below.
+    let mut copied_base = false;
+    let mut file = match from {
         Some(bundle) => {
             let manifest = read_manifest(bundle)?;
             let track = manifest.to_tour_track();
@@ -273,8 +308,16 @@ pub fn init(
             }
             TourFile::from_track(track, key.to_string(), title)
         }
+        // A locale variant starts as a copy of the base file when one exists:
+        // same selectors/advance/check, strings left in place to translate.
+        None if locale.is_some() && base_path.is_file() => {
+            copied_base = true;
+            load_tour_file(&base_path)
+                .map_err(|e| CliError::Config(format!("{}: {e}", base_path.display())))?
+        }
         None => template_file(key, title),
     };
+    file.locale = locale.map(String::from);
 
     if let Some(parent) = out_path.parent()
         && !parent.as_os_str().is_empty()
@@ -292,74 +335,125 @@ pub fn init(
             "command": "tour init",
             "output": out_path.display().to_string(),
             "key": key,
+            "locale": locale,
             "steps": file.steps.len(),
             "from": from.map(|p| p.display().to_string()),
+            "copiedBase": copied_base,
         });
         println!(
             "{}",
             serde_json::to_string_pretty(&out).expect("serializing tour init output")
         );
     } else {
+        let locale_label = locale.map(|l| format!(" [{l}]")).unwrap_or_default();
         println!(
-            "Created tour \"{key}\" ({} steps) → {}",
+            "Created tour \"{key}\"{locale_label} ({} steps) → {}",
             file.steps.len(),
             out_path.display()
         );
-        if from.is_none() {
+        if copied_base {
+            println!(
+                "Translate each step's title and body (selectors and advance stay in sync \
+                 with {}), then:",
+                base_path.display()
+            );
+        } else if from.is_none() {
             println!("Edit the placeholder selectors and copy, then:");
         } else {
             println!("Review the projected copy (recordings sell; tours instruct), then:");
         }
         println!("  stepshots tour validate {}", out_path.display());
-        println!(
-            "  stepshots tour check --url <staging-url> {}",
-            out_path.display()
-        );
+        if locale.is_some() {
+            // The copied fallback anchors are the base language's button text —
+            // refresh them from the localized UI so drift recovery works there.
+            println!(
+                "  stepshots tour check --url <localized-staging-url> --update-fallbacks {}",
+                out_path.display()
+            );
+        } else {
+            println!(
+                "  stepshots tour check --url <staging-url> {}",
+                out_path.display()
+            );
+        }
     }
     Ok(())
 }
 
 /// Statically validate tour source files: strict parse + lints. Exits
-/// non-zero when any file has errors; warnings are advisory.
+/// non-zero when any file has errors; warnings are advisory. Identity is
+/// (key, locale) — a locale variant is additionally checked against its
+/// default-locale base so stale translations fail CI.
 pub fn validate(paths: &[PathBuf], json: bool) -> Result<(), CliError> {
     let files = collect_tour_files(paths)?;
-    let mut seen_keys: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut seen_keys: BTreeMap<(String, Option<String>), PathBuf> = BTreeMap::new();
     let mut reports = Vec::with_capacity(files.len());
+    let mut parsed: Vec<(usize, TourFile)> = Vec::new();
 
     for path in &files {
         let mut errors: Vec<String> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
         let mut key = None;
+        let mut locale = None;
         let mut steps = 0;
         match load_tour_file(path) {
             Err(e) => errors.push(e),
             Ok(file) => {
                 lint_tour_file(&file, &mut errors, &mut warnings);
-                if let Some(prev) = seen_keys.insert(file.key.clone(), path.clone()) {
+                let identity = (file.key.clone(), file.locale.clone());
+                if let Some(prev) = seen_keys.insert(identity, path.clone()) {
                     errors.push(format!(
-                        "duplicate tour key \"{}\" (also used by {})",
+                        "duplicate tour key \"{}\"{} (also used by {})",
                         file.key,
+                        file.locale
+                            .as_deref()
+                            .map(|l| format!(" for locale \"{l}\""))
+                            .unwrap_or_default(),
                         prev.display()
                     ));
                 }
-                key = Some(file.key);
+                key = Some(file.key.clone());
+                locale = file.locale.clone();
                 steps = file.steps.len();
+                parsed.push((reports.len(), file));
             }
         }
-        reports.push((path.clone(), key, steps, errors, warnings));
+        reports.push((path.clone(), key, locale, steps, errors, warnings));
     }
 
-    let error_count: usize = reports.iter().map(|r| r.3.len()).sum();
-    let warn_count: usize = reports.iter().map(|r| r.4.len()).sum();
+    // Cross-file pass: every locale variant must track its default-locale base.
+    let bases: BTreeMap<&str, &TourFile> = parsed
+        .iter()
+        .filter(|(_, f)| f.locale.is_none())
+        .map(|(_, f)| (f.key.as_str(), f))
+        .collect();
+    for (idx, file) in &parsed {
+        if file.locale.is_none() {
+            continue;
+        }
+        let report = &mut reports[*idx];
+        match bases.get(file.key.as_str()) {
+            Some(base) => lint_locale_variant(base, file, &mut report.4, &mut report.5),
+            None => report.5.push(format!(
+                "no default-locale file for key \"{}\" — `tour build` without --locale won't \
+                 include this tour",
+                file.key
+            )),
+        }
+    }
+
+    let error_count: usize = reports.iter().map(|r| r.4.len()).sum();
+    let warn_count: usize = reports.iter().map(|r| r.5.len()).sum();
 
     if json {
         let out = serde_json::json!({
             "success": error_count == 0,
             "command": "tour validate",
-            "files": reports.iter().map(|(path, key, steps, errors, warnings)| {
+            "files": reports.iter().map(|(path, key, locale, steps, errors, warnings)| {
                 serde_json::json!({
                     "path": path.display().to_string(),
                     "key": key,
+                    "locale": locale,
                     "steps": steps,
                     "status": if !errors.is_empty() { "error" }
                               else if !warnings.is_empty() { "warn" } else { "ok" },
@@ -374,8 +468,12 @@ pub fn validate(paths: &[PathBuf], json: bool) -> Result<(), CliError> {
             serde_json::to_string_pretty(&out).expect("serializing tour validate output")
         );
     } else {
-        for (path, key, steps, errors, warnings) in &reports {
-            let label = key.as_deref().unwrap_or("?");
+        for (path, key, locale, steps, errors, warnings) in &reports {
+            let label = match (key.as_deref(), locale.as_deref()) {
+                (Some(k), Some(l)) => format!("{k} [{l}]"),
+                (Some(k), None) => k.to_string(),
+                _ => "?".to_string(),
+            };
             if !errors.is_empty() {
                 println!("✗ {} — {label}", path.display());
             } else if !warnings.is_empty() {
@@ -406,19 +504,35 @@ pub fn validate(paths: &[PathBuf], json: bool) -> Result<(), CliError> {
 
 /// Merge tour source files into a `window.__STEPSHOTS_TOURS` registry script
 /// for script-tag installs. Bundler users import the `.tour.json` directly.
-pub fn build(paths: &[PathBuf], output: &Path, json: bool) -> Result<(), CliError> {
-    let files = collect_tour_files(paths)?;
-    let mut registry: BTreeMap<String, TourTrack> = BTreeMap::new();
-    for path in &files {
+/// Without `locale`, only default-locale files are included; with `locale`,
+/// each key resolves to its matching variant, falling back to the base — the
+/// app then includes the registry that matches its own UI language.
+pub fn build(
+    paths: &[PathBuf],
+    output: &Path,
+    locale: Option<&str>,
+    json: bool,
+) -> Result<(), CliError> {
+    if let Some(tag) = locale
+        && !valid_locale(tag)
+    {
+        return Err(CliError::Config(format!(
+            "locale \"{tag}\" is not a language tag (expected e.g. \"de\" or \"fr-CA\")"
+        )));
+    }
+    let paths = collect_tour_files(paths)?;
+    let mut files: Vec<(PathBuf, TourFile)> = Vec::with_capacity(paths.len());
+    for path in &paths {
         let file = load_tour_file(path)
             .map_err(|e| CliError::Config(format!("{}: {e}", path.display())))?;
-        if registry.contains_key(&file.key) {
-            return Err(CliError::Config(format!(
-                "duplicate tour key \"{}\" — every tour file needs a unique key",
-                file.key
-            )));
-        }
-        registry.insert(file.key.clone(), file.to_track());
+        files.push((path.clone(), file));
+    }
+    let selected = select_for_locale(&files, locale)?;
+    let variant_files = files.iter().filter(|(_, f)| f.locale.is_some()).count();
+
+    let mut registry: BTreeMap<String, TourTrack> = BTreeMap::new();
+    for (key, file) in &selected {
+        registry.insert(key.clone(), file.to_track());
     }
 
     let registry_json = serde_json::to_string_pretty(&registry)?;
@@ -437,7 +551,12 @@ pub fn build(paths: &[PathBuf], output: &Path, json: bool) -> Result<(), CliErro
             "success": true,
             "command": "tour build",
             "output": output.display().to_string(),
-            "tours": registry.keys().collect::<Vec<_>>(),
+            "locale": locale,
+            "tours": selected.iter().map(|(key, file)| serde_json::json!({
+                "key": key,
+                "locale": file.locale,
+                "steps": file.steps.len(),
+            })).collect::<Vec<_>>(),
         });
         println!(
             "{}",
@@ -445,11 +564,62 @@ pub fn build(paths: &[PathBuf], output: &Path, json: bool) -> Result<(), CliErro
         );
     } else {
         println!("Built {} tour(s) → {}", registry.len(), output.display());
-        for (key, track) in &registry {
-            println!("  - {key} ({} steps)", track.steps.len());
+        for (key, file) in &selected {
+            let resolved = match (locale, file.locale.as_deref()) {
+                (Some(_), Some(l)) => format!(", {l}"),
+                (Some(_), None) => ", default locale".to_string(),
+                (None, _) => String::new(),
+            };
+            println!("  - {key} ({} steps{resolved})", file.steps.len());
+        }
+        if locale.is_none() && variant_files > 0 {
+            println!(
+                "  ({variant_files} locale variant file(s) not included — build them with \
+                 `--locale <tag>`)"
+            );
         }
     }
     Ok(())
+}
+
+/// Pick one file per key for a build: the requested locale's variant when
+/// present, the default-locale file otherwise. Variants of other locales are
+/// left out — each locale gets its own registry build.
+fn select_for_locale<'a>(
+    files: &'a [(PathBuf, TourFile)],
+    locale: Option<&str>,
+) -> Result<BTreeMap<String, &'a TourFile>, CliError> {
+    // A duplicate (key, locale) pair is an authoring error regardless of the
+    // requested locale — catch it before selection silently drops one.
+    let mut seen: BTreeMap<(&str, Option<&str>), &Path> = BTreeMap::new();
+    for (path, file) in files {
+        if let Some(prev) = seen.insert((file.key.as_str(), file.locale.as_deref()), path) {
+            return Err(CliError::Config(format!(
+                "duplicate tour key \"{}\"{} in {} and {}",
+                file.key,
+                file.locale
+                    .as_deref()
+                    .map(|l| format!(" for locale \"{l}\""))
+                    .unwrap_or_default(),
+                prev.display(),
+                path.display()
+            )));
+        }
+    }
+    let mut selected: BTreeMap<String, &TourFile> = BTreeMap::new();
+    if let Some(want) = locale {
+        for (_, file) in files {
+            if file.locale.as_deref() == Some(want) {
+                selected.insert(file.key.clone(), file);
+            }
+        }
+    }
+    for (_, file) in files {
+        if file.locale.is_none() {
+            selected.entry(file.key.clone()).or_insert(file);
+        }
+    }
+    Ok(selected)
 }
 
 /// After recording a `"target": "tour"` tutorial: warn about interactive
@@ -580,6 +750,13 @@ fn lint_tour_file(file: &TourFile, errors: &mut Vec<String>, warnings: &mut Vec<
     if file.key.is_empty() || file.key.chars().any(char::is_whitespace) {
         errors.push("key must be non-empty and contain no whitespace".into());
     }
+    if let Some(locale) = &file.locale
+        && !valid_locale(locale)
+    {
+        errors.push(format!(
+            "locale \"{locale}\" is not a language tag (expected e.g. \"de\" or \"fr-CA\")"
+        ));
+    }
     if file.steps.is_empty() {
         errors.push("a tour needs at least one step".into());
     }
@@ -627,6 +804,56 @@ fn lint_tour_file(file: &TourFile, errors: &mut Vec<String>, warnings: &mut Vec<
             warnings.push(format!(
                 "step {n}: fallback carries no text or aria anchor — drop it, or run \
                  `tour check --update-fallbacks` to capture anchors"
+            ));
+        }
+    }
+}
+
+/// Loose language-tag check ("de", "fr-CA", "zh-Hant"): a 2–3 letter primary
+/// subtag plus optional alphanumeric subtags — enough to catch typos without
+/// re-implementing BCP 47.
+fn valid_locale(tag: &str) -> bool {
+    let mut parts = tag.split('-');
+    let primary = parts.next().unwrap_or("");
+    if !(2..=3).contains(&primary.len()) || !primary.chars().all(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+    parts.all(|p| (1..=8).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphanumeric()))
+}
+
+/// Compare a locale variant against its default-locale base. A translation
+/// should only change the user-visible strings (title, body, fallback
+/// anchors) — structure drift means the base changed since the translation
+/// was written, which is exactly what CI should catch.
+fn lint_locale_variant(
+    base: &TourFile,
+    variant: &TourFile,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    let locale = variant.locale.as_deref().unwrap_or("?");
+    if base.steps.len() != variant.steps.len() {
+        errors.push(format!(
+            "translation out of date: {} step(s), but the default-locale file has {} — re-sync \
+             the \"{locale}\" variant with the base",
+            variant.steps.len(),
+            base.steps.len()
+        ));
+        return;
+    }
+    for (i, (b, v)) in base.steps.iter().zip(&variant.steps).enumerate() {
+        let n = i + 1;
+        if b.selector != v.selector {
+            warnings.push(format!(
+                "step {n}: selector differs from the default-locale file (\"{}\" vs \"{}\") — \
+                 fine only if the {locale} UI really renders different markup",
+                v.selector, b.selector
+            ));
+        }
+        if b.advance != v.advance {
+            warnings.push(format!(
+                "step {n}: advance differs from the default-locale file — a translation should \
+                 only change the copy"
             ));
         }
     }
@@ -723,5 +950,132 @@ mod tests {
     fn humanize_key_capitalizes_and_spaces() {
         assert_eq!(humanize_key("getting-started"), "Getting started");
         assert_eq!(humanize_key("a_b"), "A b");
+    }
+
+    #[test]
+    fn valid_locale_accepts_tags_and_rejects_junk() {
+        for ok in ["de", "fr-CA", "zh-Hant", "pt-BR", "es-419"] {
+            assert!(valid_locale(ok), "{ok} should be valid");
+        }
+        for bad in [
+            "",
+            "d",
+            "german",
+            "de_DE",
+            "de-",
+            "-de",
+            "de-toolongsubtag1",
+        ] {
+            assert!(!valid_locale(bad), "{bad} should be invalid");
+        }
+    }
+
+    #[test]
+    fn lints_flag_bad_locale() {
+        let file = file_from(serde_json::json!({
+            "schema": "1", "key": "k", "locale": "german!", "title": "T",
+            "steps": [{ "selector": "#a", "title": "t", "body": "b",
+                        "advance": { "type": "click" } }]
+        }));
+        let (errors, _) = lint(&file);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("language tag"), "{errors:?}");
+    }
+
+    fn base_and_variant() -> (TourFile, TourFile) {
+        let base = file_from(serde_json::json!({
+            "schema": "1", "key": "onboarding", "title": "Getting started",
+            "steps": [
+                { "selector": "#new", "title": "Create", "body": "Click.",
+                  "advance": { "type": "click" }, "fallback": { "text": "New project" } },
+                { "selector": "#name", "title": "Name", "body": "Type.",
+                  "advance": { "type": "input" }, "check": { "value": "x" } }
+            ]
+        }));
+        let variant = file_from(serde_json::json!({
+            "schema": "1", "key": "onboarding", "locale": "de", "title": "Erste Schritte",
+            "steps": [
+                { "selector": "#new", "title": "Erstellen", "body": "Klicken.",
+                  "advance": { "type": "click" }, "fallback": { "text": "Neues Projekt" } },
+                { "selector": "#name", "title": "Benennen", "body": "Tippen.",
+                  "advance": { "type": "input" }, "check": { "value": "x" } }
+            ]
+        }));
+        (base, variant)
+    }
+
+    fn cross_lint(base: &TourFile, variant: &TourFile) -> (Vec<String>, Vec<String>) {
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+        lint_locale_variant(base, variant, &mut errors, &mut warnings);
+        (errors, warnings)
+    }
+
+    #[test]
+    fn translated_variant_with_matching_structure_lints_clean() {
+        let (base, variant) = base_and_variant();
+        let (errors, warnings) = cross_lint(&base, &variant);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn stale_translation_step_count_is_an_error() {
+        let (mut base, variant) = base_and_variant();
+        base.steps.push(base.steps[0].clone()); // base grew since translation
+        let (errors, _) = cross_lint(&base, &variant);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("translation out of date"), "{errors:?}");
+    }
+
+    #[test]
+    fn structure_drift_in_a_variant_warns() {
+        let (base, mut variant) = base_and_variant();
+        variant.steps[0].selector = "#other".into();
+        variant.steps[1].advance = TourAdvance::Change;
+        let (errors, warnings) = cross_lint(&base, &variant);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+    }
+
+    #[test]
+    fn select_for_locale_prefers_variant_and_falls_back() {
+        let (base, variant) = base_and_variant();
+        let other = file_from(serde_json::json!({
+            "schema": "1", "key": "billing", "title": "Billing",
+            "steps": [{ "selector": "#b", "title": "t", "body": "b",
+                        "advance": { "type": "click" } }]
+        }));
+        let files = vec![
+            (PathBuf::from("tours/onboarding.tour.json"), base),
+            (PathBuf::from("tours/onboarding.de.tour.json"), variant),
+            (PathBuf::from("tours/billing.tour.json"), other),
+        ];
+
+        // Default build: base files only — the de variant never collides.
+        let default = select_for_locale(&files, None).unwrap();
+        assert_eq!(default.len(), 2);
+        assert_eq!(default["onboarding"].locale, None);
+
+        // de build: variant wins for onboarding, billing falls back to base.
+        let de = select_for_locale(&files, Some("de")).unwrap();
+        assert_eq!(de.len(), 2);
+        assert_eq!(de["onboarding"].locale.as_deref(), Some("de"));
+        assert_eq!(de["billing"].locale, None);
+
+        // fr build: no fr variants anywhere — everything falls back.
+        let fr = select_for_locale(&files, Some("fr")).unwrap();
+        assert_eq!(fr["onboarding"].locale, None);
+    }
+
+    #[test]
+    fn select_for_locale_rejects_duplicate_identity() {
+        let (base, _) = base_and_variant();
+        let files = vec![
+            (PathBuf::from("a.tour.json"), base.clone()),
+            (PathBuf::from("b.tour.json"), base),
+        ];
+        let err = select_for_locale(&files, None).unwrap_err();
+        assert!(err.to_string().contains("duplicate tour key"), "{err}");
     }
 }

@@ -903,6 +903,13 @@ pub struct TourFile {
     /// Identity of the tour: registry key in `window.__STEPSHOTS_TOURS`, the
     /// `?tour=` query-param value, and the upsert key for `tour push`.
     pub key: String,
+    /// Language tag of a translated variant (e.g. "de", "fr-CA"), absent on
+    /// the default-locale file. Variants share their base file's `key` —
+    /// identity is (key, locale) — and by convention live next to it as
+    /// `tours/<key>.<locale>.tour.json`. `tour build --locale` picks the
+    /// matching variant per key, falling back to the base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     /// Human-readable tour title, shown in the dashboard.
     pub title: String,
     /// Ordered tour steps.
@@ -925,6 +932,7 @@ impl TourFile {
             json_schema: Some(TOUR_SCHEMA_URL.to_string()),
             schema: TOUR_FILE_SCHEMA_VERSION.to_string(),
             key,
+            locale: None,
             title,
             steps: track
                 .steps
@@ -1330,6 +1338,21 @@ mod tour_file_tests {
         let mut json = sample_file_json();
         json["steps"][0]["tittle"] = serde_json::json!("oops");
         assert!(serde_json::from_value::<TourFile>(json).is_err());
+    }
+
+    #[test]
+    fn locale_variant_parses_and_default_stays_locale_free() {
+        // A translated variant carries `locale`; the default file omits it —
+        // both on parse and when serialized (skip_serializing_if).
+        let mut json = sample_file_json();
+        json["locale"] = serde_json::json!("de");
+        let variant: TourFile = serde_json::from_value(json).unwrap();
+        assert_eq!(variant.locale.as_deref(), Some("de"));
+
+        let base: TourFile = serde_json::from_value(sample_file_json()).unwrap();
+        assert_eq!(base.locale, None);
+        let serialized = serde_json::to_value(&base).unwrap();
+        assert!(serialized.get("locale").is_none());
     }
 
     #[test]
