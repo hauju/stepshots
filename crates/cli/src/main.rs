@@ -164,6 +164,12 @@ enum Commands {
         /// Persistent browser profile directory to create or reuse
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: PathBuf,
+
+        /// Viewport size as WxH (e.g. 1440x900) or a preset (desktop-hd,
+        /// desktop, tablet-landscape, tablet-portrait, mobile,
+        /// mobile-landscape, square)
+        #[arg(long, default_value = "1280x800", value_parser = commands::browser::parse_viewport)]
+        viewport: manifest::Viewport,
     },
     /// Upload .stepshot bundles to the Stepshots API
     Upload {
@@ -561,8 +567,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             )
             .await?;
         }
-        Commands::Browser { url, profile_dir } => {
-            commands::browser::run(&url, &profile_dir).await?;
+        Commands::Browser {
+            url,
+            profile_dir,
+            viewport,
+        } => {
+            commands::browser::run(&url, &profile_dir, &viewport).await?;
         }
         Commands::Upload {
             files,
