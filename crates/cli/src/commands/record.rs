@@ -276,6 +276,14 @@ pub async fn record_tutorial(
 
         let step_result: Result<(), CliError> = async {
             wait_for_step_target(&browser, step).await?;
+            // Never persist sensitive input into the bundle manifest: explicit
+            // `secret: true` steps, and anything typed into a password field.
+            // The target exists here (wait_for_step_target), so the DOM check is reliable.
+            let redact_input = step.secret == Some(true)
+                || match (step.action.as_str(), step.selector.as_deref()) {
+                    ("type", Some(sel)) => browser.is_password_input(sel).await,
+                    _ => false,
+                };
             let capture_before_action = should_capture_before_action(step);
             restore_scene_scroll(&browser, step).await?;
 
@@ -388,13 +396,21 @@ pub async fn record_tutorial(
                 } else {
                     Some(step_zooms)
                 },
-                text: step.text.clone(),
+                text: if redact_input {
+                    None
+                } else {
+                    step.text.clone()
+                },
                 key: step.key.clone(),
                 scroll_x: step.scroll_x,
                 scroll_y: step.scroll_y,
                 scene_scroll_x: step.scene_scroll_x,
                 scene_scroll_y: step.scene_scroll_y,
-                value: step.value.clone(),
+                value: if redact_input {
+                    None
+                } else {
+                    step.value.clone()
+                },
                 delay: step.delay,
                 transition_frames: transition_frame_paths,
             });

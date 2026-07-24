@@ -237,6 +237,28 @@ impl Browser {
         }
     }
 
+    /// Whether the element is a password input. Used to redact typed text from
+    /// the bundle manifest. Returns `false` when the element isn't found or the
+    /// check fails — callers treat this as advisory, not a guarantee.
+    pub async fn is_password_input(&self, selector: &str) -> bool {
+        let js = format!(
+            r#"
+            (() => {{
+                const el = document.querySelector({selector});
+                return !!el && el.type === "password";
+            }})()
+            "#,
+            selector = match serde_json::to_string(selector) {
+                Ok(s) => s,
+                Err(_) => return false,
+            }
+        );
+        match self.page().evaluate(js).await {
+            Ok(result) => result.into_value::<bool>().unwrap_or(false),
+            Err(_) => false,
+        }
+    }
+
     /// Capture the target element's text + aria-label, for use as a resilient
     /// fallback anchor when the CSS selector later drifts. Returns `(text, aria)`;
     /// both `None` if the element isn't found.

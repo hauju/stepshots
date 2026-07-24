@@ -139,15 +139,9 @@ async fn handle_record(
     std::fs::create_dir_all(&output_dir).ok();
     let output_path = output_dir.join(format!("{}.stepshot", req.tutorial_name));
 
-    match record::record_tutorial(
-        &req.config,
-        &tutorial,
-        &req.config.viewport,
-        &output_path,
-        false,
-        None,
-    )
-    .await
+    let viewport = manifest::resolve_viewport(req.config.format.as_ref(), &req.config.viewport);
+    match record::record_tutorial(&req.config, &tutorial, &viewport, &output_path, false, None)
+        .await
     {
         Ok((_, None)) => {
             let dir = output_dir

@@ -36,6 +36,11 @@ pub async fn run(
         }
 
         let bundle_bytes = std::fs::read(path)?;
+        let bundle_file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("bundle.stepshot")
+            .to_string();
 
         if let Some(demo_id) = replace_demo_id {
             // Replace existing demo
@@ -43,30 +48,28 @@ pub async fn run(
                 println!("Replacing demo {demo_id} with: {file_path}");
             }
 
-            let form = multipart::Form::new().part(
-                "bundle",
-                multipart::Part::bytes(bundle_bytes)
-                    .file_name(
-                        path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("bundle.stepshot")
-                            .to_string(),
-                    )
-                    .mime_str("application/zip")
-                    .map_err(|e| CliError::Upload(format!("MIME error: {e}")))?,
-            );
-
             let url = format!(
                 "{}/api/demos/{demo_id}/replace-bundle",
                 server_url.trim_end_matches('/')
             );
 
-            let resp = client
-                .put(&url)
-                .header("Authorization", format!("Bearer {token}"))
-                .multipart(form)
-                .send()
-                .await?;
+            let resp = send_with_retry(
+                || {
+                    let form = multipart::Form::new().part(
+                        "bundle",
+                        multipart::Part::bytes(bundle_bytes.clone())
+                            .file_name(bundle_file_name.clone())
+                            .mime_str("application/zip")
+                            .map_err(|e| CliError::Upload(format!("MIME error: {e}")))?,
+                    );
+                    Ok(client
+                        .put(&url)
+                        .header("Authorization", format!("Bearer {token}"))
+                        .multipart(form))
+                },
+                json,
+            )
+            .await?;
 
             if resp.status().is_success() {
                 let view_url = format!(
@@ -101,34 +104,32 @@ pub async fn run(
                 println!("Uploading: {file_path} as \"{title}\"");
             }
 
-            let mut form = multipart::Form::new().text("title", title.clone());
-            if public {
-                form = form.text("public", "true");
-            }
-            let form = form.part(
-                "bundle",
-                multipart::Part::bytes(bundle_bytes)
-                    .file_name(
-                        path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("bundle.stepshot")
-                            .to_string(),
-                    )
-                    .mime_str("application/zip")
-                    .map_err(|e| CliError::Upload(format!("MIME error: {e}")))?,
-            );
-
             let url = format!(
                 "{}/api/demos/upload-bundle",
                 server_url.trim_end_matches('/')
             );
 
-            let resp = client
-                .post(&url)
-                .header("Authorization", format!("Bearer {token}"))
-                .multipart(form)
-                .send()
-                .await?;
+            let resp = send_with_retry(
+                || {
+                    let mut form = multipart::Form::new().text("title", title.clone());
+                    if public {
+                        form = form.text("public", "true");
+                    }
+                    let form = form.part(
+                        "bundle",
+                        multipart::Part::bytes(bundle_bytes.clone())
+                            .file_name(bundle_file_name.clone())
+                            .mime_str("application/zip")
+                            .map_err(|e| CliError::Upload(format!("MIME error: {e}")))?,
+                    );
+                    Ok(client
+                        .post(&url)
+                        .header("Authorization", format!("Bearer {token}"))
+                        .multipart(form))
+                },
+                json,
+            )
+            .await?;
 
             if resp.status().is_success() {
                 let body: serde_json::Value = resp.json().await?;
@@ -177,6 +178,44 @@ pub async fn run(
     }
 
     Ok(results)
+}
+
+/// Send an upload request with bounded retry: connection errors, timeouts and
+/// 5xx responses back off exponentially (1s, 2s, 4s) before giving up; 4xx
+/// fail fast. The builder closure runs once per attempt because a multipart
+/// body can't be reused after a send.
+async fn send_with_retry<F>(build: F, json: bool) -> Result<reqwest::Response, CliError>
+where
+    F: Fn() -> Result<reqwest::RequestBuilder, CliError>,
+{
+    const MAX_ATTEMPTS: u32 = 4;
+    let mut attempt = 1;
+    loop {
+        let result = build()?.send().await;
+        let retryable = match &result {
+            Ok(resp) => resp.status().is_server_error(),
+            Err(e) => e.is_connect() || e.is_timeout(),
+        };
+        if !retryable || attempt >= MAX_ATTEMPTS {
+            return Ok(result?);
+        }
+        let delay = std::time::Duration::from_secs(1 << (attempt - 1));
+        if !json {
+            match &result {
+                Ok(resp) => println!(
+                    "  Server error ({}), retrying in {}s…",
+                    resp.status(),
+                    delay.as_secs()
+                ),
+                Err(e) => println!(
+                    "  Connection error ({e}), retrying in {}s…",
+                    delay.as_secs()
+                ),
+            }
+        }
+        tokio::time::sleep(delay).await;
+        attempt += 1;
+    }
 }
 
 /// Turn a non-success upload response into a helpful error. A 401 means the

@@ -147,6 +147,11 @@ pub struct StepConfig {
     /// Milliseconds to wait after this action, overriding the config `defaultDelay`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay: Option<u64>,
+    /// Mark this step's `text`/`value` as sensitive: it is used during recording
+    /// but never persisted into the `.stepshot` bundle manifest. Typing into a
+    /// password field is redacted automatically even without this flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<bool>,
     /// Horizontal scroll distance in pixels for the "scroll" action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_x: Option<f64>,
@@ -1033,6 +1038,7 @@ impl From<&BundleManifestStep> for StepConfig {
             key: step.key.clone(),
             value: step.value.clone(),
             delay: step.delay,
+            secret: None,
             scroll_x: step.scroll_x,
             scroll_y: step.scroll_y,
             scene_scroll_x: step.scene_scroll_x,

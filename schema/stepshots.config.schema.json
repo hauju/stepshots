@@ -493,6 +493,13 @@
           ],
           "format": "double"
         },
+        "secret": {
+          "description": "Mark this step's `text`/`value` as sensitive: it is used during recording\nbut never persisted into the `.stepshot` bundle manifest. Typing into a\npassword field is redacted automatically even without this flag.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "selector": {
           "description": "CSS selector of the element this action targets. Required for click, type, hover, and select.",
           "type": [

@@ -142,6 +142,26 @@ stepshots record --tutorial my-tutorial --profile-dir ~/.stepshots/profile
 
 Set `STEPSHOTS_PROFILE_DIR` to avoid repeating the flag. Use a dedicated profile directory — never your regular Chrome profile.
 
+### Amend a recording (one-shot flows)
+
+Some flows can't be re-recorded — a signup wizard you can only complete once, a destructive action, a third-party app. `stepshots patch` amends an existing `.stepshot` bundle with manually captured steps instead: it opens a visible browser locked to the bundle's viewport (so captures match pixel-for-pixel), you stage each page by hand and press Enter to capture, then Ctrl+C saves the bundle (a backup of the original is kept next to it).
+
+```sh
+# Append captured steps at the end
+stepshots patch output/my-tutorial.stepshot
+
+# Insert captured steps starting at position 3 (later steps shift back)
+stepshots patch output/my-tutorial.stepshot --at 3
+
+# Re-capture step 5's screenshot, keeping its metadata and overlays
+stepshots patch output/my-tutorial.stepshot --replace 5
+
+# Authenticated pages: reuse a logged-in profile (see above)
+stepshots patch output/my-tutorial.stepshot --profile-dir ~/.stepshots/profile
+```
+
+By default the browser opens at the URL stored in the bundle; override it with `--url`. Afterwards, `stepshots upload <bundle> --demo-id <DEMO_ID>` replaces the hosted demo in place.
+
 ### Authenticate
 
 Log in through your browser — this stores an API token locally at `~/.config/stepshots/tokens.json`:
