@@ -627,6 +627,178 @@ await scenario("jump trigger stashes the key, navigates, and starts on arrival",
 });
 
 // ---------------------------------------------------------------------------
+// Onboarding checklist (createChecklist).
+
+await scenario("checklist: launcher, item click runs the tour, completion checks it off", async () => {
+  const window = loadPage();
+  window.__STEPSHOTS_TOURS = { welcome: twoStep };
+  let allDone = 0;
+  window.StepshotsTour.createChecklist({
+    items: [{ tour: "welcome", label: "Take the welcome tour" }],
+    title: "Get set up",
+    inputSettleMs: 30,
+    onAllDone: () => (allDone += 1),
+  });
+  await delay(); // mount defers to DOMContentLoaded like autoBoot
+
+  const host = window.document.querySelector("[data-stepshots-checklist]");
+  check(!!host, "checklist host mounted in body");
+  const shadow = host.shadowRoot;
+  const chip = shadow.querySelector(".chip");
+  check(chip.querySelector(".label").textContent === "Get set up", "chip shows the provided title");
+  check(chip.querySelector(".count").textContent === "0/1", "chip shows 0/1 before any tour ran");
+  check(shadow.querySelector(".panel").hasAttribute("hidden"), "panel starts collapsed");
+  check(chip.getAttribute("aria-expanded") === "false", "chip starts with aria-expanded=false");
+
+  chip.click();
+  check(!shadow.querySelector(".panel").hasAttribute("hidden"), "clicking the chip expands the panel");
+  check(chip.getAttribute("aria-expanded") === "true", "expanding sets aria-expanded=true");
+  const item = shadow.querySelector(".item");
+  check(item.querySelector(".label").textContent === "Take the welcome tour", "item shows its label");
+
+  item.click();
+  await delay();
+  check(!!window.document.querySelector("[data-stepshots-tour]"), "clicking an item starts its tour");
+  check(shadow.querySelector(".panel").hasAttribute("hidden"), "launching a tour collapses the panel");
+  check(
+    window.sessionStorage.getItem("stepshots_checklist:active") === "welcome",
+    "the launched run is stashed so a reload/jump can resume it",
+  );
+
+  // Complete the tour: click step 0, type + Enter on step 1.
+  window.document.getElementById("btn1").click();
+  const field = window.document.getElementById("field1");
+  field.value = "hello";
+  field.dispatchEvent(new window.Event("input", { bubbles: true }));
+  field.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await delay();
+
+  check(chip.querySelector(".count").textContent === "1/1", "completing the tour updates the count");
+  check(shadow.querySelector(".item").classList.contains("done"), "the completed item is marked done");
+  check(
+    JSON.parse(window.localStorage.getItem("stepshots_checklist")).includes("welcome"),
+    "completion persists to localStorage",
+  );
+  check(window.sessionStorage.getItem("stepshots_checklist:active") === null, "finishing clears the run stash");
+  check(allDone === 1, "onAllDone fired once when the last item completed");
+
+  const hide = shadow.querySelector(".hide");
+  check(!!hide && hide.textContent === "Hide checklist", "a Hide action appears once everything is done");
+  hide.click();
+  check(window.document.querySelector("[data-stepshots-checklist]") === null, "hiding removes the checklist UI");
+  check(window.localStorage.getItem("stepshots_checklist:hidden") === "1", "hiding is remembered");
+});
+
+await scenario("checklist: a url item stashes the run and the next page resumes it", async () => {
+  // Page A: the item's flow starts elsewhere, so clicking navigates.
+  const pageA = loadPage();
+  pageA.StepshotsTour.createChecklist({
+    items: [{ tour: "faq-demo", label: "Invite a teammate", url: "/settings" }],
+  });
+  await delay();
+  pageA.document
+    .querySelector("[data-stepshots-checklist]")
+    .shadowRoot.querySelector(".item")
+    .click();
+  check(
+    pageA.sessionStorage.getItem("stepshots_checklist:active") === "faq-demo",
+    "the jump stashes the tour key for the destination page",
+  );
+  check(!pageA.document.querySelector("[data-stepshots-tour]"), "no tour starts on the origin page");
+
+  // Page B: destination after navigation (fresh page, same sessionStorage).
+  const pageB = loadPage({ "stepshots_checklist:active": "faq-demo" });
+  pageB.__STEPSHOTS_TOURS = { "faq-demo": twoStep };
+  pageB.StepshotsTour.createChecklist({
+    items: [{ tour: "faq-demo", label: "Invite a teammate", url: "/settings" }],
+  });
+  await delay();
+  const host = pageB.document.querySelector("[data-stepshots-tour]");
+  check(!!host, "the destination page starts the stashed tour on mount");
+  check(host?.shadowRoot?.querySelector("h4")?.textContent === "Step one", "the resumed run begins at step 0");
+});
+
+await scenario("checklist: markDone, pre-seeded completion, and the hidden flag", async () => {
+  const window = loadPage();
+  window.localStorage.setItem("stepshots_checklist", JSON.stringify(["a"]));
+  let allDone = 0;
+  const items = [
+    { tour: "a", label: "First" },
+    { tour: "b", label: "Second" },
+  ];
+  const handle = window.StepshotsTour.createChecklist({ items, onAllDone: () => (allDone += 1) });
+  await delay();
+  const shadow = window.document.querySelector("[data-stepshots-checklist]").shadowRoot;
+  check(shadow.querySelector(".chip .count").textContent === "1/2", "pre-seeded completion counts at mount");
+  check(allDone === 0, "onAllDone does not fire for partial completion");
+
+  handle.markDone("b");
+  check(shadow.querySelector(".chip .count").textContent === "2/2", "markDone checks the item off");
+  check(allDone === 1, "the transition to all-done fires onAllDone");
+
+  // A checklist that mounts already-complete must not re-fire onAllDone…
+  const window2 = loadPage();
+  window2.localStorage.setItem("stepshots_checklist", JSON.stringify(["a", "b"]));
+  let allDone2 = 0;
+  window2.StepshotsTour.createChecklist({ items, onAllDone: () => (allDone2 += 1) });
+  await delay();
+  check(allDone2 === 0, "mounting an already-complete checklist does not re-fire onAllDone");
+
+  // …and a hidden one renders nothing at all.
+  const window3 = loadPage();
+  window3.localStorage.setItem("stepshots_checklist:hidden", "1");
+  window3.StepshotsTour.createChecklist({ items });
+  await delay();
+  check(
+    window3.document.querySelector("[data-stepshots-checklist]") === null,
+    "a hidden checklist mounts no UI",
+  );
+});
+
+await scenario("checklist: position option picks the corner", async () => {
+  const right = loadPage();
+  right.StepshotsTour.createChecklist({ items: [{ tour: "a", label: "First" }] });
+  await delay();
+  const rightStyle = right.document.querySelector("[data-stepshots-checklist]").getAttribute("style");
+  check(/right:\s*20px/.test(rightStyle) && !/left:\s*20px/.test(rightStyle), "default sits bottom-right");
+
+  const left = loadPage();
+  left.StepshotsTour.createChecklist({
+    items: [{ tour: "a", label: "First" }],
+    position: "bottom-left",
+  });
+  await delay();
+  const leftStyle = left.document.querySelector("[data-stepshots-checklist]").getAttribute("style");
+  check(/left:\s*20px/.test(leftStyle) && !/right:\s*20px/.test(leftStyle), "bottom-left flips the corner");
+});
+
+await scenario("checklist: attribution badge — present with the option, absent without", async () => {
+  const withBadge = loadPage();
+  withBadge.StepshotsTour.createChecklist({
+    items: [{ tour: "a", label: "First" }],
+    badge: { label: "Powered by Stepshots", href: "https://stepshots.com/?ref=tour-badge" },
+  });
+  await delay();
+  const panel = withBadge.document
+    .querySelector("[data-stepshots-checklist]")
+    .shadowRoot.querySelector(".panel");
+  const a = panel.querySelector("a.badge");
+  check(!!a, "an attribution anchor is rendered in the panel when badge is set");
+  check(a.textContent === "Powered by Stepshots", "checklist badge uses the provided label");
+  check(a.getAttribute("rel") === "noopener noreferrer", "checklist badge sets rel");
+
+  const noBadge = loadPage();
+  noBadge.StepshotsTour.createChecklist({ items: [{ tour: "a", label: "First" }] });
+  await delay();
+  check(
+    noBadge.document
+      .querySelector("[data-stepshots-checklist]")
+      .shadowRoot.querySelector(".panel a.badge") === null,
+    "no attribution anchor when badge is omitted",
+  );
+});
+
+// ---------------------------------------------------------------------------
 
 console.log(`\n${"-".repeat(48)}`);
 if (failures.length) {

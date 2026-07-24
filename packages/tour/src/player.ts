@@ -8,7 +8,7 @@ import type {
   TourTrack,
 } from "./types";
 
-const DEFAULT_THEME = {
+export const DEFAULT_THEME = {
   accent: "#3b82f6",
   dim: "rgba(15,23,42,.55)",
   cardBg: "#ffffff",

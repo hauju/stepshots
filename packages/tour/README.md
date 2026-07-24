@@ -106,6 +106,35 @@ starts it on arrival (both pages need the registry + `autoBoot`):
 
 See `examples/faq-show-me.html` in the repo for a complete page.
 
+## Onboarding checklist
+
+Bundle your activation tours into a persistent "Getting started · 2/5" launcher.
+It expands into a checklist; clicking an item runs its tour, and the item is
+checked off when the tour completes. Progress persists per browser
+(localStorage), and once everything is done the panel offers "Hide checklist"
+(also remembered).
+
+```ts
+StepshotsTour.createChecklist({
+  title: "Getting started",
+  items: [
+    { tour: "create-project", label: "Create your first project" },
+    { tour: "invite-teammate", label: "Invite a teammate", url: "/settings/team" },
+  ],
+  onAllDone: () => confetti(),
+});
+```
+
+Give an item a `url` when its flow starts on a different page: clicking
+navigates there and the checklist on the destination page starts the tour on
+arrival — the same jump mechanism as `data-stepshots-tour-url`. Mount the
+checklist (and the registry) on every page and cross-page items and mid-tour
+reloads resume seamlessly.
+
+The returned handle has `open()` / `close()`, `destroy()`, and
+`markDone(tour)` — mark an item done without running its tour, for when the
+user already did the thing organically.
+
 ## API
 
 - `startTour(track, options?) → { stop() }` — render a track now.
@@ -115,6 +144,11 @@ See `examples/faq-show-me.html` in the repo for a complete page.
   alive across SPA navigations), `firstRun` (auto-start on a marker, see above).
 - `showIntro(intro, options, onChoice)` — render the consent card standalone;
   `onChoice(accepted)` tells you the user's pick.
+- `createChecklist(options) → { open(), close(), markDone(tour), destroy() }` —
+  the onboarding checklist (see above). Extra options: `items`, `title`,
+  `storageKey`, `tracks` (defaults to `window.__STEPSHOTS_TOURS`), `position`
+  (`"bottom-right"` | `"bottom-left"`), `onAllDone`; tour options below are
+  forwarded to every launched run.
 - Options: `theme` (`accent`, `dim`, `cardBg`, `cardFg`, `cardMuted`), `skipLabel`,
   `waitTimeoutMs`, `inputSettleMs` (quiet time before an input step advances, default
   1200ms), `onComplete(reason)`, `onEvent(event)` (lifecycle analytics:
