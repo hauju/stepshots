@@ -35,10 +35,13 @@ pub async fn run(
     save_failures: &Path,
     fail_on: FailOn,
     json: bool,
-    profile_dir: Option<&Path>,
+    session: crate::browser::SessionArgs<'_>,
 ) -> Result<(), CliError> {
     let selected = select_tutorials(config, tutorials)?;
     let viewport = resolve_viewport(config.format.as_ref(), &config.viewport);
+    // Loading up front keeps a bad session file from surfacing as every
+    // authenticated step "drifting" because the run was silently logged out.
+    let storage_state = session.load(!json)?;
 
     if !json {
         println!(
@@ -57,7 +60,7 @@ pub async fn run(
             key,
             save_failures,
             json,
-            profile_dir,
+            session.with_state(storage_state.as_ref()),
         )
         .await?;
         if !json {
@@ -104,9 +107,11 @@ async fn verify_tutorial(
     key: &str,
     save_failures: &Path,
     json: bool,
-    profile_dir: Option<&Path>,
+    session: crate::browser::SessionSource<'_>,
 ) -> Result<VerifyTutorial, CliError> {
-    let browser = Browser::launch(viewport, true, profile_dir).await?;
+    // Seeds cookies before the first navigation — cookies set after a page
+    // loads arrive too late to authenticate it.
+    let browser = Browser::launch_with_session(viewport, true, session).await?;
 
     if let Some(ref theme) = config.theme {
         browser.set_color_scheme(theme).await?;

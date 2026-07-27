@@ -6,6 +6,7 @@ mod commands;
 mod config;
 mod error;
 pub mod output;
+mod storage_state;
 
 use std::path::PathBuf;
 
@@ -98,6 +99,13 @@ enum Commands {
         /// Persistent browser profile directory (for authenticated recordings)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
+
+        /// Session state JSON — cookies and localStorage in Playwright's
+        /// `storageState` format. Use instead of --profile-dir in CI, where a
+        /// browser profile cannot travel: regenerate the file each run from
+        /// your existing login setup.
+        #[arg(long, value_name = "PATH", env = "STEPSHOTS_STORAGE_STATE")]
+        storage_state: Option<PathBuf>,
     },
     /// List the tutorials defined in the config
     List,
@@ -153,6 +161,13 @@ enum Commands {
         /// Persistent browser profile directory (for authenticated flows)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
+
+        /// Session state JSON — cookies and localStorage in Playwright's
+        /// `storageState` format. Use instead of --profile-dir in CI, where a
+        /// browser profile cannot travel: regenerate the file each run from
+        /// your existing login setup.
+        #[arg(long, value_name = "PATH", env = "STEPSHOTS_STORAGE_STATE")]
+        storage_state: Option<PathBuf>,
     },
     /// Open a visible browser with a saved profile to log in to sites
     /// used by authenticated recordings
@@ -490,6 +505,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             output,
             dry_run,
             profile_dir,
+            storage_state,
         } => {
             let mut selected = tutorials;
             selected.extend(tutorial);
@@ -504,7 +520,10 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 &output,
                 dry_run,
                 json,
-                profile_dir.as_deref(),
+                crate::browser::SessionArgs {
+                    profile_dir: profile_dir.as_deref(),
+                    storage_state: storage_state.as_deref(),
+                },
             )
             .await?;
         }
@@ -548,6 +567,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             save_failures,
             fail_on,
             profile_dir,
+            storage_state,
         } => {
             let mut selected = tutorials;
             selected.extend(tutorial);
@@ -563,7 +583,10 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 &save_failures,
                 fail_on,
                 json,
-                profile_dir.as_deref(),
+                crate::browser::SessionArgs {
+                    profile_dir: profile_dir.as_deref(),
+                    storage_state: storage_state.as_deref(),
+                },
             )
             .await?;
         }

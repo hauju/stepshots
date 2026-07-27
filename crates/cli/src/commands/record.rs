@@ -35,9 +35,10 @@ pub async fn run(
     output_dir: &Path,
     dry_run: bool,
     json: bool,
-    profile_dir: Option<&Path>,
+    session: crate::browser::SessionArgs<'_>,
 ) -> Result<(), CliError> {
     let selected = crate::config::select_tutorials(config, tutorials)?;
+    let storage_state = session.load(!json)?;
 
     let mut tutorial_outputs: Vec<TutorialOutput> = Vec::new();
     let mut failed = 0usize;
@@ -76,7 +77,7 @@ pub async fn run(
             &effective_viewport,
             &output_path,
             json,
-            profile_dir,
+            session.with_state(storage_state.as_ref()),
         )
         .await
         {
@@ -226,9 +227,11 @@ pub async fn record_tutorial(
     viewport: &Viewport,
     output_path: &Path,
     json: bool,
-    profile_dir: Option<&Path>,
+    session: crate::browser::SessionSource<'_>,
 ) -> Result<(Vec<StepOutput>, Option<StepFailure>), CliError> {
-    let browser = Browser::launch(viewport, true, profile_dir).await?;
+    // Seeds cookies before the first navigation — cookies set after a page
+    // loads arrive too late to authenticate it.
+    let browser = Browser::launch_with_session(viewport, true, session).await?;
 
     // Apply color scheme if configured
     if let Some(ref theme) = config.theme {

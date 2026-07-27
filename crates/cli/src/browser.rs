@@ -2,12 +2,73 @@ use std::sync::Arc;
 
 use chromiumoxide::Page;
 use chromiumoxide::browser::{Browser as CdpBrowser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::network::{
+    CookieParam, CookieSameSite, SetCookiesParams, TimeSinceEpoch,
+};
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::target::TargetId;
 use futures::StreamExt;
 use manifest::{ElementBounds, Point2D, Viewport};
 
 use crate::error::CliError;
+
+/// Where a run's browser session comes from.
+///
+/// The two are alternatives for the same job — arriving at a page already
+/// logged in — and travel together through every command that records or
+/// replays, so they are passed as one value rather than two parallel options.
+/// `profile_dir` is the local answer; `storage_state` is the one that works in
+/// CI. Both absent means an anonymous session, which is the common case.
+#[derive(Default, Clone, Copy)]
+pub struct SessionSource<'a> {
+    pub profile_dir: Option<&'a std::path::Path>,
+    pub storage_state: Option<&'a crate::storage_state::StorageState>,
+}
+
+/// The session flags exactly as they arrive from the command line, before any
+/// file has been read. [`SessionArgs::load`] turns this into a
+/// [`SessionSource`].
+#[derive(Default, Clone, Copy)]
+pub struct SessionArgs<'a> {
+    pub profile_dir: Option<&'a std::path::Path>,
+    pub storage_state: Option<&'a std::path::Path>,
+}
+
+impl<'a> SessionArgs<'a> {
+    /// Read the storage-state file, if one was given.
+    ///
+    /// Callers do this once up front, before launching anything: a malformed or
+    /// empty session file should fail immediately, not after the first tutorial
+    /// has quietly recorded a set of logged-out screenshots.
+    pub fn load(
+        &self,
+        announce: bool,
+    ) -> Result<Option<crate::storage_state::StorageState>, CliError> {
+        let Some(path) = self.storage_state else {
+            return Ok(None);
+        };
+        let state = crate::storage_state::StorageState::load(path)?;
+        if announce {
+            println!(
+                "Using session state: {} ({})",
+                path.display(),
+                state.summary()
+            );
+        }
+        Ok(Some(state))
+    }
+
+    /// Pair the flags with an already-loaded state.
+    pub fn with_state(
+        &self,
+        state: Option<&'a crate::storage_state::StorageState>,
+    ) -> SessionSource<'a> {
+        SessionSource {
+            profile_dir: self.profile_dir,
+            storage_state: state,
+        }
+    }
+}
 
 /// Wrapper around a CDP browser instance.
 pub struct Browser {
@@ -164,6 +225,63 @@ impl Browser {
             .wait_for_navigation()
             .await
             .map_err(|e| CliError::Browser(format!("Wait for navigation failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Launch, then seed whatever session the run was given — so callers can
+    /// never accidentally navigate before applying it.
+    pub async fn launch_with_session(
+        viewport: &Viewport,
+        headless: bool,
+        session: SessionSource<'_>,
+    ) -> Result<Self, CliError> {
+        let browser = Self::launch(viewport, headless, session.profile_dir).await?;
+        if let Some(state) = session.storage_state {
+            browser.apply_storage_state(state).await?;
+        }
+        Ok(browser)
+    }
+
+    /// Seed the browser with a saved session so the first navigation lands
+    /// already authenticated.
+    ///
+    /// Must be called before navigating anywhere. Cookies go in over CDP, which
+    /// needs no page to be loaded. `localStorage` cannot be written for an
+    /// origin the browser is not on, so instead of navigating to each origin in
+    /// turn this registers an init script that runs before page scripts on every
+    /// document and restores the entries for whichever origin matches.
+    pub async fn apply_storage_state(
+        &self,
+        state: &crate::storage_state::StorageState,
+    ) -> Result<(), CliError> {
+        let page = self.page();
+
+        let cookies: Vec<CookieParam> = state.cookies.iter().map(to_cookie_param).collect();
+        if !cookies.is_empty() {
+            // The raw CDP command, not chromiumoxide's `set_cookies` helper.
+            // That helper resolves each cookie against the *page's* URL and
+            // rejects anything non-http — so on the `about:blank` we are still
+            // sitting on it fails with "Blank page can not have cookie". Seeding
+            // before the first navigation is the entire point here, and
+            // Network.setCookies is happy with a `domain` and no page loaded.
+            page.execute(SetCookiesParams::new(cookies))
+                .await
+                .map_err(|e| {
+                    CliError::Browser(format!(
+                        "Failed to apply cookies from the storage state: {e}. \
+                     Each cookie needs either a `domain` or a `url`."
+                    ))
+                })?;
+        }
+
+        if let Some(script) = state.local_storage_script() {
+            page.evaluate_on_new_document(script).await.map_err(|e| {
+                CliError::Browser(format!(
+                    "Failed to install the localStorage restore script: {e}"
+                ))
+            })?;
+        }
+
         Ok(())
     }
 
@@ -371,5 +489,91 @@ impl Browser {
     /// Get a handle to the currently active CDP page.
     pub fn page(&self) -> Arc<Page> {
         self.page.lock().unwrap().clone()
+    }
+}
+
+/// Translate one saved cookie into the CDP parameter shape.
+///
+/// Two mismatches between the file format and CDP are handled here: Playwright
+/// writes `expires: -1` for a session cookie where CDP wants the field absent,
+/// and `sameSite` is a free string in JSON but an enum on the wire. An
+/// unrecognised `sameSite` is dropped rather than rejected — Chrome applies its
+/// own default, and failing a whole recording over one advisory field would be
+/// a poor trade.
+fn to_cookie_param(cookie: &crate::storage_state::Cookie) -> CookieParam {
+    let mut param = CookieParam::new(cookie.name.clone(), cookie.value.clone());
+    param.url = cookie.url.clone();
+    param.domain = cookie.domain.clone();
+    param.path = cookie.path.clone();
+    param.secure = cookie.secure;
+    param.http_only = cookie.http_only;
+    param.expires = cookie.expires.filter(|e| *e > 0.0).map(TimeSinceEpoch::new);
+    param.same_site =
+        cookie
+            .same_site
+            .as_deref()
+            .and_then(|s| match s.to_ascii_lowercase().as_str() {
+                "strict" => Some(CookieSameSite::Strict),
+                "lax" => Some(CookieSameSite::Lax),
+                "none" => Some(CookieSameSite::None),
+                _ => None,
+            });
+    param
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage_state::Cookie;
+
+    fn cookie(json: &str) -> Cookie {
+        serde_json::from_str(json).expect("parses")
+    }
+
+    #[test]
+    fn session_cookies_drop_the_sentinel_expiry() {
+        // Playwright writes -1 for "expires at end of session"; CDP reads that
+        // literally as 1969 and would discard the cookie on arrival.
+        let param = to_cookie_param(&cookie(
+            r#"{"name":"s","value":"v","expires":-1,"domain":"x.test"}"#,
+        ));
+        assert!(param.expires.is_none());
+    }
+
+    #[test]
+    fn real_expiries_survive() {
+        let param = to_cookie_param(&cookie(
+            r#"{"name":"s","value":"v","expires":1893456000,"domain":"x.test"}"#,
+        ));
+        assert!(param.expires.is_some());
+    }
+
+    #[test]
+    fn same_site_maps_case_insensitively() {
+        for (input, expected) in [
+            (r#""Strict""#, Some(CookieSameSite::Strict)),
+            (r#""lax""#, Some(CookieSameSite::Lax)),
+            (r#""NONE""#, Some(CookieSameSite::None)),
+        ] {
+            let param = to_cookie_param(&cookie(&format!(
+                r#"{{"name":"s","value":"v","sameSite":{input}}}"#
+            )));
+            assert_eq!(param.same_site, expected, "input {input}");
+        }
+    }
+
+    #[test]
+    fn unknown_same_site_is_dropped_not_fatal() {
+        let param = to_cookie_param(&cookie(
+            r#"{"name":"s","value":"v","sameSite":"Unspecified"}"#,
+        ));
+        assert!(param.same_site.is_none());
+    }
+
+    #[test]
+    fn name_and_value_always_carry_over() {
+        let param = to_cookie_param(&cookie(r#"{"name":"session","value":"abc123"}"#));
+        assert_eq!(param.name, "session");
+        assert_eq!(param.value, "abc123");
     }
 }
