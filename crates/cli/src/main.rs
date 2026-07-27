@@ -4,6 +4,7 @@ mod browser;
 mod bundler;
 mod commands;
 mod config;
+mod dom_extract;
 mod error;
 pub mod output;
 mod storage_state;
@@ -95,6 +96,15 @@ enum Commands {
         /// Show what would be recorded without launching a browser
         #[arg(long)]
         dry_run: bool,
+
+        /// Capture a DOM structural extract alongside each screenshot, as input
+        /// to the sandbox generator. Overrides `captureDom` in the config.
+        ///
+        /// Extracts carry real page text. They are redacted at capture time
+        /// (blur regions, `redactSelectors`, PII scrub) and are stripped from
+        /// the public bundle on publish — never served to demo viewers.
+        #[arg(long)]
+        dom: bool,
 
         /// Persistent browser profile directory (for authenticated recordings)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
@@ -504,13 +514,18 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             tutorial,
             output,
             dry_run,
+            dom,
             profile_dir,
             storage_state,
         } => {
             let mut selected = tutorials;
             selected.extend(tutorial);
             let config_path = config::find_config(cli.config.as_deref())?;
-            let config = config::load_config(&config_path)?;
+            let mut config = config::load_config(&config_path)?;
+            // The flag turns capture on; it never turns a config opt-in off.
+            if dom {
+                config.capture_dom = Some(true);
+            }
             if !json {
                 println!("Using config: {}", config_path.display());
             }

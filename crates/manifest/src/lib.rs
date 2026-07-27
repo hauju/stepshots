@@ -2,6 +2,11 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod dom;
+pub use dom::{
+    AssetRef, DOM_EXTRACT_VERSION, DomExtract, DomNode, DomNodeKind, DomStats, DomTokens,
+};
+
 // ============================================================================
 // Recording config types (stepshots.config.json — shared across CLI, extension, etc.)
 // ============================================================================
@@ -78,6 +83,21 @@ pub struct StepshotsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(schema_with = "theme_schema"))]
     pub theme: Option<String>,
+    /// Capture a DOM structural extract alongside each screenshot, as input to
+    /// the sandbox generator. Off by default. Equivalent to `record --dom`.
+    ///
+    /// Extracts carry real page text, so they are redacted at capture time and
+    /// never served to demo viewers. See `docs/dom-extract-spec.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_dom: Option<bool>,
+    /// CSS selectors whose subtrees are elided from DOM extracts entirely.
+    /// Applies on top of blur regions, which redact by geometry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redact_selectors: Vec<String>,
+    /// Include `input`/`textarea`/`select` values in DOM extracts. Off by
+    /// default; password fields are never captured regardless of this setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_input_values: Option<bool>,
     /// Tutorials to record, keyed by a short slug that becomes the output file name.
     pub tutorials: HashMap<String, TutorialConfig>,
 }
@@ -1024,6 +1044,14 @@ pub struct BundleManifestStep {
     /// Filenames of intermediate JPEG frames for flipbook-style scroll transitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition_frames: Option<Vec<String>>,
+    /// Filename of this step's DOM structural extract, e.g. `"dom/1.json"`.
+    ///
+    /// Input to the sandbox generator, never rendered. Present only when the
+    /// recording was made with `--dom`. **Stripped from the public bundle on
+    /// publish** — an extract maps the customer's application and must never be
+    /// served to a viewer. See `docs/dom-extract-spec.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dom: Option<String>,
 }
 
 impl From<&BundleManifestStep> for StepConfig {

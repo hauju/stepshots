@@ -8,7 +8,7 @@ use chromiumoxide::cdp::browser_protocol::network::{
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::target::TargetId;
 use futures::StreamExt;
-use manifest::{ElementBounds, Point2D, Viewport};
+use manifest::{DomExtract, ElementBounds, Point2D, Viewport};
 
 use crate::error::CliError;
 
@@ -353,6 +353,25 @@ impl Browser {
             }
             _ => Ok(None),
         }
+    }
+
+    /// Capture a DOM structural extract of the current page.
+    ///
+    /// Redaction (blur overlap, redact selectors, PII scrub) happens in-page, so
+    /// unredacted text never reaches this process. Returns `None` when the page
+    /// yields nothing usable rather than failing the recording — an extract is
+    /// an enhancement, and losing one must not cost the user a whole run.
+    pub async fn extract_dom(
+        &self,
+        opts: &crate::dom_extract::DomExtractOpts<'_>,
+    ) -> Result<Option<DomExtract>, CliError> {
+        let result = self
+            .page()
+            .evaluate(opts.to_script())
+            .await
+            .map_err(|e| CliError::Browser(format!("DOM extract failed: {e}")))?;
+
+        Ok(result.into_value::<DomExtract>().ok())
     }
 
     /// Whether the element is a password input. Used to redact typed text from

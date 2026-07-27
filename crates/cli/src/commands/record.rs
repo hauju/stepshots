@@ -259,12 +259,17 @@ pub async fn record_tutorial(
 
     let mut screenshots: Vec<Vec<u8>> = Vec::with_capacity(step_count);
     let mut manifest_steps: Vec<BundleManifestStep> = Vec::with_capacity(step_count);
+    // DOM structural extracts keyed by step index, when `--dom` / `captureDom`.
+    let mut all_dom_extracts: std::collections::HashMap<usize, Vec<u8>> =
+        std::collections::HashMap::new();
     let mut step_results: Vec<StepOutput> = Vec::with_capacity(step_count);
     // Annotations whose anchors drifted (element gone or off-screen) during recording.
     let mut drift: Vec<AnnotationDrift> = Vec::new();
     // Transition frames keyed by step index (0-based, matching screenshot index)
     let mut all_transition_frames: std::collections::HashMap<usize, Vec<Vec<u8>>> =
         std::collections::HashMap::new();
+
+    let capture_dom = config.capture_dom == Some(true);
 
     // Execute each config step and capture the screenshot for that step's scene.
     let mut failure: Option<StepFailure> = None;
@@ -301,11 +306,16 @@ pub async fn record_tutorial(
                 _ => None,
             };
             let mut target_identity: (Option<String>, Option<String>) = (None, None);
+            // Serialized DOM extract for this step, captured at the same instant
+            // as the screenshot so the two describe the same page state.
+            let mut dom_json: Option<Vec<u8>> = None;
             if capture_before_action {
                 scene_url = get_current_url(&browser).await;
                 overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
                 let png = browser.screenshot().await?;
                 screenshots.push(png);
+                dom_json =
+                    capture_dom_extract(&browser, capture_dom, &overlays.blurs, config).await;
                 if let Some(sel) = ident_selector {
                     target_identity = browser.get_element_identity(sel).await.unwrap_or_default();
                 }
@@ -326,6 +336,8 @@ pub async fn record_tutorial(
                 overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
                 let png = browser.screenshot().await?;
                 screenshots.push(png);
+                dom_json =
+                    capture_dom_extract(&browser, capture_dom, &overlays.blurs, config).await;
                 if let Some(sel) = ident_selector {
                     target_identity = browser.get_element_identity(sel).await.unwrap_or_default();
                 }
@@ -342,6 +354,10 @@ pub async fn record_tutorial(
 
             // Build transition frame paths and store the frame data
             let step_idx = i;
+            let dom_path = dom_json.map(|bytes| {
+                all_dom_extracts.insert(step_idx, bytes);
+                format!("dom/{step_idx}.json")
+            });
             let transition_frame_paths: Option<Vec<String>> =
                 if !action_result.transition_frames.is_empty() {
                     let paths: Vec<String> = (0..action_result.transition_frames.len())
@@ -416,6 +432,7 @@ pub async fn record_tutorial(
                 },
                 delay: step.delay,
                 transition_frames: transition_frame_paths,
+                dom: dom_path,
             });
 
             Ok(())
@@ -507,9 +524,52 @@ pub async fn record_tutorial(
         steps: manifest_steps,
     };
 
-    create_bundle(&manifest, &screenshots, &all_transition_frames, output_path)?;
+    create_bundle(
+        &manifest,
+        &screenshots,
+        &all_transition_frames,
+        &all_dom_extracts,
+        output_path,
+    )?;
 
     Ok((step_results, None))
+}
+
+/// Capture and serialize this step's DOM extract, or `None` when disabled or
+/// unavailable.
+///
+/// Best-effort by design: an extract is generator input, not part of the demo.
+/// A page that defeats the walker must not cost the user the recording, so
+/// failures warn and continue.
+async fn capture_dom_extract(
+    browser: &Browser,
+    enabled: bool,
+    blur_regions: &[manifest::ElementBounds],
+    config: &StepshotsConfig,
+) -> Option<Vec<u8>> {
+    if !enabled {
+        return None;
+    }
+    let opts = crate::dom_extract::DomExtractOpts {
+        blur_regions,
+        redact_selectors: &config.redact_selectors,
+        capture_input_values: config.capture_input_values == Some(true),
+        ..Default::default()
+    };
+    match browser.extract_dom(&opts).await {
+        Ok(Some(extract)) => match serde_json::to_vec(&extract) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                eprintln!("⚠ DOM extract could not be serialized: {e}");
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(e) => {
+            eprintln!("⚠ {e}");
+            None
+        }
+    }
 }
 
 /// Best-effort screenshot of the page as it looked when a step failed,
