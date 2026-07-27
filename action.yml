@@ -52,9 +52,13 @@ inputs:
     description: "Override the demo title on upload"
     required: false
   version:
-    description: "Stepshots CLI version (git ref) to install"
+    description: "Stepshots CLI version to install: 'latest' for the newest published release, a release tag (e.g. v1.5.0), or a git branch/SHA. Tags install a prebuilt binary; git refs build from source."
     required: false
-    default: "main"
+    default: "latest"
+  github-token:
+    description: "Token used to resolve the latest release tag (avoids anonymous API rate limits)"
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   bundles:
@@ -67,21 +71,100 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Install Stepshots CLI
+      id: install
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: hauju/stepshots
+      run: |
+        set -euo pipefail
+
+        VERSION="$INPUT_VERSION"
+
+        if [ "$VERSION" = "latest" ]; then
+          VERSION="$(curl -fsSL --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPO/releases/latest" \
+            | jq -r '.tag_name // empty')" || VERSION=""
+          if [ -z "$VERSION" ]; then
+            echo "::warning::could not resolve the latest release (none published?); building from main"
+            VERSION="main"
+          fi
+        fi
+
+        # Only tagged releases have prebuilt binaries; anything else is a git ref.
+        TARGET=""
+        if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
+            Linux-aarch64) TARGET="aarch64-unknown-linux-gnu" ;;
+            Darwin-arm64)  TARGET="aarch64-apple-darwin" ;;
+          esac
+        fi
+
+        if [ -n "$TARGET" ]; then
+          ASSET="stepshots-${VERSION}-${TARGET}.tar.gz"
+          URL="https://github.com/$REPO/releases/download/${VERSION}/${ASSET}"
+          BIN_DIR="$RUNNER_TEMP/stepshots-bin"
+
+          if curl -fsSL --retry 3 -o "$ASSET" "$URL" \
+            && curl -fsSL --retry 3 -o "${ASSET}.sha256" "${URL}.sha256"; then
+
+            EXPECTED="$(awk '{print $1}' "${ASSET}.sha256")"
+            ACTUAL="$(shasum -a 256 "$ASSET" | awk '{print $1}')"
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "::error::checksum mismatch for ${ASSET}: expected ${EXPECTED}, got ${ACTUAL}"
+              exit 1
+            fi
+
+            mkdir -p "$BIN_DIR"
+            tar -xzf "$ASSET" --strip-components=1 -C "$BIN_DIR"
+            chmod +x "$BIN_DIR/stepshots"
+            rm -f "$ASSET" "${ASSET}.sha256"
+            echo "$BIN_DIR" >> "$GITHUB_PATH"
+
+            echo "from-source=false" >> "$GITHUB_OUTPUT"
+            echo "Installed prebuilt stepshots ${VERSION} (${TARGET})"
+            exit 0
+          fi
+
+          echo "::warning::no prebuilt binary for ${VERSION}/${TARGET}; falling back to a source build"
+        fi
+
+        echo "from-source=true" >> "$GITHUB_OUTPUT"
+        echo "cargo-ref=$VERSION" >> "$GITHUB_OUTPUT"
+
     - name: Install Rust toolchain
+      if: steps.install.outputs.from-source == 'true'
       uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
       with:
         toolchain: stable
 
     - name: Cache Rust build
+      if: steps.install.outputs.from-source == 'true'
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
         cache-on-failure: true
 
-    - name: Install Stepshots CLI
+    - name: Build Stepshots CLI from source
+      if: steps.install.outputs.from-source == 'true'
       shell: bash
       env:
-        INPUT_VERSION: ${{ inputs.version }}
-      run: cargo install --git https://github.com/hauju/stepshots.git --ref "$INPUT_VERSION" stepshots-cli
+        CARGO_REF: ${{ steps.install.outputs.cargo-ref }}
+        GIT_URL: https://github.com/hauju/stepshots.git
+      run: |
+        set -euo pipefail
+        # cargo install has no --ref; pick the flag that matches the ref shape.
+        if [[ "$CARGO_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          cargo install --locked --git "$GIT_URL" --tag "$CARGO_REF" stepshots-cli
+        elif [[ "$CARGO_REF" =~ ^[0-9a-f]{7,40}$ ]]; then
+          cargo install --locked --git "$GIT_URL" --rev "$CARGO_REF" stepshots-cli
+        else
+          cargo install --locked --git "$GIT_URL" --branch "$CARGO_REF" stepshots-cli
+        fi
 
     - name: Install Chrome
       uses: browser-actions/setup-chrome@4f8e94349a351df0f048634f25fec36c3c91eded # v2.1.1
