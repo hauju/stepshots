@@ -99,13 +99,24 @@ pub async fn run(
     let mut worst = Verdict::Ok;
 
     for path in bundles {
-        let asset = check_bundle(
-            path,
-            url_override,
-            json,
-            session.with_state(storage_state.as_ref()),
-        )
-        .await?;
+        let is_tour = path.to_string_lossy().ends_with(".tour.json");
+        let asset = if is_tour {
+            check_tour(
+                path,
+                url_override,
+                json,
+                session.with_state(storage_state.as_ref()),
+            )
+            .await?
+        } else {
+            check_bundle(
+                path,
+                url_override,
+                json,
+                session.with_state(storage_state.as_ref()),
+            )
+            .await?
+        };
         worst = max_verdict(worst, verdict_of(&asset));
         assets.push(asset);
     }
@@ -223,6 +234,184 @@ async fn check_bundle(
         unanchored: unanchored
             .into_iter()
             .map(|(step, selector)| format!("step {step}: {selector}"))
+            .collect(),
+    })
+}
+
+/// Check a guided tour without replaying it.
+///
+/// A `.tour.json` carries no baseline extract, so there is nothing to diff —
+/// but it does carry, per step, the selector and the text/aria fallback the
+/// player uses. Resolving each of those independently answers the same question
+/// `tour check` answers, minus the cascade: `tour check` walks the flow, so a
+/// step that can't be reached hides every step after it. Here an unreachable
+/// step costs one finding, not visibility into the rest of the tour.
+///
+/// The trade is real: this cannot tell you an *advance action* broke, only that
+/// a target is gone. Run both.
+async fn check_tour(
+    tour_path: &Path,
+    url_override: Option<&str>,
+    json: bool,
+    session: crate::browser::SessionSource<'_>,
+) -> Result<DriftAsset, CliError> {
+    let name = tour_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| tour_path.display().to_string());
+
+    let tour = super::tour::load_tour_file(tour_path)
+        .map_err(|e| CliError::Bundle(format!("{name}: {e}")))?;
+
+    let base = url_override
+        .ok_or_else(|| CliError::Bundle(format!("{name}: tours carry no base URL — pass --url")))?;
+
+    // Group steps by the page they live on. Most tours are single-page, so this
+    // is usually one navigation for the whole tour.
+    let mut by_path: BTreeMap<String, Vec<(usize, &manifest::TourFileStep)>> = BTreeMap::new();
+    for (i, step) in tour.steps.iter().enumerate() {
+        let path = step
+            .check
+            .as_ref()
+            .and_then(|c| c.path.clone())
+            .unwrap_or_default();
+        by_path.entry(path).or_default().push((i + 1, step));
+    }
+
+    let browser =
+        Browser::launch_with_session(&manifest::default_viewport(), true, session).await?;
+    browser.disable_cache().await?;
+
+    let mut routes = Vec::new();
+    let mut worst = Verdict::Ok;
+
+    for (path, steps) in by_path {
+        let target = join_url(base, &path);
+        browser.navigate(&target).await?;
+        browser.wait_idle(800).await;
+
+        let opts = crate::dom_extract::DomExtractOpts::default();
+        let Some(page) = browser.extract_dom(&opts).await? else {
+            return Err(CliError::Browser(format!(
+                "{name}: could not extract DOM at {target}"
+            )));
+        };
+
+        let mut findings = Vec::new();
+        for (n, step) in steps {
+            // Selector first — exactly the order the player resolves in.
+            if browser.get_bounds(&step.selector).await?.is_some() {
+                continue;
+            }
+            let fb = step.fallback.as_ref();
+            let has_fallback = fb.is_some_and(|f| {
+                crate::drift::has_anchor(&page, f.aria.as_deref(), f.text.as_deref())
+            });
+
+            if has_fallback {
+                findings.push(crate::drift::Finding {
+                    severity: Severity::Content,
+                    kind: "drift",
+                    what: step.selector.clone(),
+                    detail: "selector missed; the player would fall back to its text/aria anchor"
+                        .into(),
+                    step: Some(n),
+                    nodes: 1,
+                });
+            } else {
+                findings.push(crate::drift::Finding {
+                    severity: Severity::Critical,
+                    kind: "fail",
+                    what: step.selector.clone(),
+                    detail: match fb {
+                        Some(_) => "neither the selector nor its fallback anchor resolves".into(),
+                        None => "selector missing and the step has no fallback anchor".into(),
+                    },
+                    step: Some(n),
+                    nodes: 1,
+                });
+            }
+        }
+
+        let verdict = if findings.iter().any(|f| f.severity == Severity::Critical) {
+            Verdict::Stale
+        } else if findings.is_empty() {
+            Verdict::Ok
+        } else {
+            Verdict::Drifted
+        };
+        worst = max_verdict(worst, verdict);
+
+        let critical = findings
+            .iter()
+            .filter(|f| f.severity == Severity::Critical)
+            .count();
+        let content = findings.len() - critical;
+
+        routes.push(DriftRoute {
+            path: path.clone(),
+            url: target,
+            first_step: 1,
+            verdict: format!("{verdict:?}").to_lowercase(),
+            summary: DriftSummary {
+                critical,
+                content,
+                layout: 0,
+                nodes_before: 0,
+                nodes_after: page.node_count(),
+            },
+            findings,
+        });
+    }
+
+    if !json {
+        println!("\n{name}");
+        for r in &routes {
+            let mark = match r.verdict.as_str() {
+                "ok" => "✓",
+                "drifted" => "~",
+                _ => "✗",
+            };
+            let where_ = if r.path.is_empty() { "/" } else { &r.path };
+            let issues = r.summary.critical + r.summary.content;
+            println!(
+                "  {mark} {where_} — {}",
+                if issues == 0 {
+                    "every step still resolves".to_string()
+                } else {
+                    format!(
+                        "{issues} step(s) need attention ({} breaking)",
+                        r.summary.critical
+                    )
+                }
+            );
+            for f in &r.findings {
+                let tag = if f.severity == Severity::Critical {
+                    "!"
+                } else {
+                    "-"
+                };
+                println!(
+                    "      {tag} step {} `{}` — {}",
+                    f.step.unwrap_or(0),
+                    f.what,
+                    f.detail
+                );
+            }
+        }
+        println!("  note: `tour check` additionally verifies each step's advance action");
+    }
+
+    Ok(DriftAsset {
+        name,
+        verdict: format!("{worst:?}").to_lowercase(),
+        routes,
+        unanchored: tour
+            .steps
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.fallback.is_none())
+            .map(|(i, s)| format!("step {}: {}", i + 1, s.selector))
             .collect(),
     })
 }

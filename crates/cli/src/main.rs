@@ -183,8 +183,8 @@ enum Commands {
     /// Check recorded demos against the live app by diffing DOM extracts
     /// (no replay — sees changes no step points at, and never cascades)
     Drift {
-        /// .stepshot bundles to check
-        #[arg(value_name = "BUNDLE", required = true)]
+        /// .stepshot bundles or *.tour.json files to check
+        #[arg(value_name = "ASSET", required = true)]
         bundles: Vec<PathBuf>,
 
         /// Base URL to check against (default: the bundle's own baseUrl)

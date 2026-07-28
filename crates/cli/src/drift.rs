@@ -97,7 +97,15 @@ impl StepDrift {
 /// An element's identity, most durable first. Deliberately the same ladder the
 /// tour player and `tour check` use to re-resolve a drifted target — a node this
 /// can't re-anchor is a node the player would also fail to find.
+///
+/// Redacted nodes anchor structurally instead. Their text is `█` blocks sized to
+/// the original string, so a value that merely *changed length* — `$1,284` to
+/// `$12,847` — would otherwise produce a different key and read as one element
+/// removed and another added. Every live dashboard would show permanent drift.
 fn anchor_of(node: &DomNode, path: &str) -> String {
+    if node.redacted == Some(true) {
+        return format!("path:{path}");
+    }
     if let Some(aria) = &node.aria {
         return format!("aria:{aria}");
     }
@@ -188,6 +196,71 @@ pub fn unanchored_steps(steps: &[BundleManifestStep]) -> Vec<(usize, String)> {
         .collect()
 }
 
+/// How far a replacement candidate may sit from the element it replaces.
+/// A renamed button stays roughly where it was; something across the page is a
+/// different control that happens to share a tag.
+const HEAL_RADIUS_PX: f64 = 120.0;
+
+/// Find the most likely replacement for an element that disappeared.
+///
+/// Scoped deliberately: same tag, appeared since the recording, and near where
+/// the original sat. Anything looser starts proposing plausible-but-wrong
+/// anchors, and a heal that silently re-points a demo at the wrong element is
+/// worse than a reported break — the demo keeps running and quietly lies.
+///
+/// Returns `None` rather than guessing when two candidates are comparably close;
+/// an ambiguous suggestion is a decision the human should make.
+fn suggest_replacement(gone: &DomNode, added: &[(&String, &DomNode)]) -> Option<(String, f64)> {
+    let centre = |n: &DomNode| (n.b[0] + n.b[2] / 2.0, n.b[1] + n.b[3] / 2.0);
+    let (gx, gy) = centre(gone);
+
+    let mut scored: Vec<(&String, f64)> = added
+        .iter()
+        .filter(|(_, n)| n.tag == gone.tag)
+        .map(|(k, n)| {
+            let (cx, cy) = centre(n);
+            (*k, ((cx - gx).powi(2) + (cy - gy).powi(2)).sqrt())
+        })
+        .filter(|(_, d)| *d <= HEAL_RADIUS_PX)
+        .collect();
+
+    scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    match scored.as_slice() {
+        [] => None,
+        // A clear winner needs to be meaningfully closer than the runner-up.
+        [(k, d)] => Some(((*k).clone(), *d)),
+        [(k, d), (_, d2), ..] if *d2 - *d > 24.0 => Some(((*k).clone(), *d)),
+        _ => None,
+    }
+}
+
+/// Whether a text/aria anchor still exists anywhere on the captured page.
+///
+/// Used for tours, which carry no baseline extract to diff against — only the
+/// fallback anchors the player would use. Answering "is this anchor still
+/// present" per step, from one capture, gives `tour check`'s verdict without
+/// its replay: a step that can't be reached no longer hides every step after it.
+pub fn has_anchor(extract: &DomExtract, aria: Option<&str>, text: Option<&str>) -> bool {
+    let mut found = false;
+    extract.visit(&mut |node| {
+        if found {
+            return;
+        }
+        if let (Some(want), Some(got)) = (aria, node.aria.as_deref())
+            && want == got
+        {
+            found = true;
+        }
+        if let (Some(want), Some(got)) = (text, node.txt.as_deref())
+            && want.trim() == got.trim()
+        {
+            found = true;
+        }
+    });
+    found
+}
+
 /// Quantised bounds delta, used as the cascade-collapse grouping key.
 fn delta(before: &DomNode, after: &DomNode) -> Option<[i64; 4]> {
     let d: Vec<f64> = before
@@ -247,16 +320,28 @@ pub fn diff(before: &DomExtract, after: &DomExtract, steps: &[BundleManifestStep
     let a_keys: HashSet<&String> = a.keys().collect();
     let b_keys: HashSet<&String> = b.keys().collect();
 
+    // Elements that appeared since the recording — the candidate pool a
+    // vanished anchor could have been renamed into.
+    let added_nodes: Vec<(&String, &DomNode)> =
+        b_keys.difference(&a_keys).map(|k| (*k, &b[*k])).collect();
+
     // --- removed ---------------------------------------------------------
     for key in a_keys.difference(&b_keys) {
         let node = &a[*key];
         let base = base_of(key);
         if let Some(step) = anchors.get(base) {
+            let detail = match suggest_replacement(node, &added_nodes) {
+                Some((candidate, dist)) => format!(
+                    "targeted by this step, absent from the live page — likely renamed to {} ({dist:.0}px away)",
+                    base_of(&candidate)
+                ),
+                None => "targeted by this step, absent from the live page".into(),
+            };
             findings.push(Finding {
                 severity: Severity::Critical,
                 kind: "removed",
                 what: base.to_string(),
-                detail: "targeted by this step, absent from the live page".into(),
+                detail,
                 step: Some(*step),
                 nodes: 1,
             });
@@ -300,8 +385,14 @@ pub fn diff(before: &DomExtract, after: &DomExtract, steps: &[BundleManifestStep
         let (before_node, after_node) = (&a[*key], &b[*key]);
         let base = base_of(key);
 
+        // A redacted node's text is block characters, and the region was blurred
+        // precisely because it holds volatile data. Comparing it reports the
+        // data changing — which is expected, not drift.
+        let redacted = before_node.redacted == Some(true) || after_node.redacted == Some(true);
+
         if let (Some(old), Some(new)) = (&before_node.txt, &after_node.txt)
             && old != new
+            && !redacted
         {
             let step = anchors.get(base).copied();
             findings.push(Finding {
@@ -549,6 +640,128 @@ mod tests {
         assert_eq!(moves.len(), 2);
         assert!(moves.iter().any(|m| m.nodes == 2));
         assert!(moves.iter().any(|m| m.nodes == 1));
+    }
+
+    /// Blurred regions hold volatile data by definition — a metric that merely
+    /// changes value must not read as drift, or every live dashboard is
+    /// permanently "stale".
+    #[test]
+    fn redacted_values_changing_length_are_not_drift() {
+        let mut before = node("body", [0.0, 0.0, 100.0, 100.0]);
+        let mut old_cell = texted(
+            "td",
+            "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+            [0.0, 0.0, 40.0, 10.0],
+        );
+        old_cell.redacted = Some(true);
+        before.kids = vec![old_cell];
+
+        let mut after = node("body", [0.0, 0.0, 100.0, 100.0]);
+        // One character longer: $1,284 -> $12,847
+        let mut new_cell = texted(
+            "td",
+            "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+            [0.0, 0.0, 40.0, 10.0],
+        );
+        new_cell.redacted = Some(true);
+        after.kids = vec![new_cell];
+
+        let d = diff(&extract(before), &extract(after), &[]);
+        assert_eq!(d.verdict, Verdict::Ok, "{:?}", d.findings);
+    }
+
+    #[test]
+    fn drift_around_a_redacted_node_is_still_caught() {
+        let mut before = node("body", [0.0, 0.0, 100.0, 100.0]);
+        let mut cell = texted("td", "\u{2588}\u{2588}\u{2588}", [0.0, 0.0, 40.0, 10.0]);
+        cell.redacted = Some(true);
+        before.kids = vec![cell, labelled("button", "Export", [50.0, 0.0, 10.0, 10.0])];
+
+        let mut after = node("body", [0.0, 0.0, 100.0, 100.0]);
+        let mut cell2 = texted(
+            "td",
+            "\u{2588}\u{2588}\u{2588}\u{2588}",
+            [0.0, 0.0, 40.0, 10.0],
+        );
+        cell2.redacted = Some(true);
+        after.kids = vec![cell2];
+
+        let d = diff(&extract(before), &extract(after), &[]);
+        assert!(
+            d.findings.iter().any(|f| f.what == "aria:Export"),
+            "redaction must not mask a real removal: {:?}",
+            d.findings
+        );
+    }
+
+    #[test]
+    fn a_renamed_button_in_place_is_suggested() {
+        let mut before = node("body", [0.0, 0.0, 200.0, 100.0]);
+        before.kids = vec![texted("button", "Preview", [10.0, 10.0, 60.0, 20.0])];
+        let mut after = node("body", [0.0, 0.0, 200.0, 100.0]);
+        after.kids = vec![texted("button", "Viewer", [10.0, 10.0, 60.0, 20.0])];
+
+        let d = diff(
+            &extract(before),
+            &extract(after),
+            &[step(None, Some("Preview"))],
+        );
+        let crit = d
+            .findings
+            .iter()
+            .find(|f| f.severity == Severity::Critical)
+            .unwrap();
+        assert!(
+            crit.detail.contains("likely renamed to txt:Viewer"),
+            "{}",
+            crit.detail
+        );
+    }
+
+    #[test]
+    fn a_distant_element_is_not_suggested() {
+        let mut before = node("body", [0.0, 0.0, 900.0, 900.0]);
+        before.kids = vec![texted("button", "Preview", [10.0, 10.0, 60.0, 20.0])];
+        let mut after = node("body", [0.0, 0.0, 900.0, 900.0]);
+        // Same tag, but across the page — a different control, not a rename.
+        after.kids = vec![texted("button", "Delete", [700.0, 800.0, 60.0, 20.0])];
+
+        let d = diff(
+            &extract(before),
+            &extract(after),
+            &[step(None, Some("Preview"))],
+        );
+        let crit = d
+            .findings
+            .iter()
+            .find(|f| f.severity == Severity::Critical)
+            .unwrap();
+        assert!(!crit.detail.contains("likely renamed"), "{}", crit.detail);
+    }
+
+    /// Two equally-plausible candidates must produce no suggestion. Picking one
+    /// would re-point the demo at a coin-flip.
+    #[test]
+    fn ambiguous_candidates_produce_no_suggestion() {
+        let mut before = node("body", [0.0, 0.0, 200.0, 100.0]);
+        before.kids = vec![texted("button", "Preview", [50.0, 10.0, 20.0, 20.0])];
+        let mut after = node("body", [0.0, 0.0, 200.0, 100.0]);
+        after.kids = vec![
+            texted("button", "Alpha", [30.0, 10.0, 20.0, 20.0]),
+            texted("button", "Beta", [70.0, 10.0, 20.0, 20.0]),
+        ];
+
+        let d = diff(
+            &extract(before),
+            &extract(after),
+            &[step(None, Some("Preview"))],
+        );
+        let crit = d
+            .findings
+            .iter()
+            .find(|f| f.severity == Severity::Critical)
+            .unwrap();
+        assert!(!crit.detail.contains("likely renamed"), "{}", crit.detail);
     }
 
     #[test]
