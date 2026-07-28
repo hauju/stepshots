@@ -1,5 +1,6 @@
 pub mod browser;
 pub mod doctor;
+pub mod drift;
 pub mod init;
 pub mod inspect;
 pub mod list;

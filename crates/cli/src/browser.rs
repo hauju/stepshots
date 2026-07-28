@@ -215,6 +215,22 @@ impl Browser {
         Ok(())
     }
 
+    /// Bypass the HTTP cache for the rest of this session.
+    ///
+    /// Required for drift checks, and load-bearing rather than a nicety: a
+    /// cached response makes a changed page look unchanged, which is the one
+    /// wrong answer a drift check must never give — it reports "no drift" on a
+    /// demo that is actually broken. Verified against a local server where the
+    /// same URL served new bytes and the browser kept returning the old page.
+    pub async fn disable_cache(&self) -> Result<(), CliError> {
+        use chromiumoxide::cdp::browser_protocol::network::SetCacheDisabledParams;
+        self.page()
+            .execute(SetCacheDisabledParams::new(true))
+            .await
+            .map_err(|e| CliError::Browser(format!("Failed to disable HTTP cache: {e}")))?;
+        Ok(())
+    }
+
     /// Navigate to a URL and wait for the page to load.
     pub async fn navigate(&self, url: &str) -> Result<(), CliError> {
         self.page()

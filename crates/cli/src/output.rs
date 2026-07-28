@@ -230,3 +230,56 @@ pub struct DoctorCheck {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
+
+/// Top-level result of `stepshots drift`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftOutput {
+    pub success: bool,
+    pub command: &'static str,
+    /// Worst verdict across every asset checked: ok | drifted | stale.
+    pub verdict: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assets: Option<Vec<DriftAsset>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorOutput>,
+}
+
+/// One bundle or tour file checked.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftAsset {
+    pub name: String,
+    /// ok | drifted | stale | unsupported (no DOM extracts in the bundle)
+    pub verdict: String,
+    pub routes: Vec<DriftRoute>,
+    /// Steps targeting an element that captured no durable anchor, so drift
+    /// against them cannot be detected by any means.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unanchored: Vec<String>,
+}
+
+/// One distinct route checked. Steps sharing a `current_path` collapse into a
+/// single route — they show the same page.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftRoute {
+    pub path: String,
+    pub url: String,
+    /// 1-based index of the step whose extract was used as the baseline.
+    pub first_step: usize,
+    pub verdict: String,
+    pub summary: DriftSummary,
+    pub findings: Vec<crate::drift::Finding>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftSummary {
+    pub critical: usize,
+    pub content: usize,
+    /// Collapsed layout groups, not individual moved nodes.
+    pub layout: usize,
+    pub nodes_before: usize,
+    pub nodes_after: usize,
+}

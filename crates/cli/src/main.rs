@@ -5,6 +5,7 @@ mod bundler;
 mod commands;
 mod config;
 mod dom_extract;
+mod drift;
 mod error;
 pub mod output;
 mod storage_state;
@@ -176,6 +177,30 @@ enum Commands {
         /// `storageState` format. Use instead of --profile-dir in CI, where a
         /// browser profile cannot travel: regenerate the file each run from
         /// your existing login setup.
+        #[arg(long, value_name = "PATH", env = "STEPSHOTS_STORAGE_STATE")]
+        storage_state: Option<PathBuf>,
+    },
+    /// Check recorded demos against the live app by diffing DOM extracts
+    /// (no replay — sees changes no step points at, and never cascades)
+    Drift {
+        /// .stepshot bundles to check
+        #[arg(value_name = "BUNDLE", required = true)]
+        bundles: Vec<PathBuf>,
+
+        /// Base URL to check against (default: the bundle's own baseUrl)
+        #[arg(long)]
+        url: Option<String>,
+
+        /// Exit non-zero on: stale (a step's target is gone) or drifted (any change)
+        #[arg(long, value_enum, default_value = "stale")]
+        fail_on: commands::drift::FailOn,
+
+        /// Persistent browser profile directory (for authenticated apps)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
+
+        /// Session state JSON — cookies and localStorage in Playwright's
+        /// `storageState` format. Use instead of --profile-dir in CI.
         #[arg(long, value_name = "PATH", env = "STEPSHOTS_STORAGE_STATE")]
         storage_state: Option<PathBuf>,
     },
@@ -575,6 +600,27 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         } => {
             commands::patch::run(&bundle, replace, at, url.as_deref(), profile_dir.as_deref())
                 .await?;
+        }
+        Commands::Drift {
+            bundles,
+            url,
+            fail_on,
+            profile_dir,
+            storage_state,
+        } => {
+            // Operates on bundles, not the config — a drift check runs in CI
+            // against whatever demos are committed, with no config present.
+            commands::drift::run(
+                &bundles,
+                url.as_deref(),
+                fail_on,
+                json,
+                crate::browser::SessionArgs {
+                    profile_dir: profile_dir.as_deref(),
+                    storage_state: storage_state.as_deref(),
+                },
+            )
+            .await?;
         }
         Commands::Verify {
             tutorials,
