@@ -92,6 +92,7 @@ pub async fn run(
     url_override: Option<&str>,
     fail_on: FailOn,
     json: bool,
+    push: Option<(&str, &str, &str)>,
     session: crate::browser::SessionArgs<'_>,
 ) -> Result<(), CliError> {
     let storage_state = session.load(!json)?;
@@ -118,6 +119,14 @@ pub async fn run(
             .await?
         };
         worst = max_verdict(worst, verdict_of(&asset));
+
+        if let Some((server, token, demo_id)) = push {
+            push_verdict(server, token, demo_id, &asset).await?;
+            if !json {
+                println!("  → reported to {server} for demo {demo_id}");
+            }
+        }
+
         assets.push(asset);
     }
 
@@ -137,6 +146,67 @@ pub async fn run(
 
     if exits_nonzero(worst, fail_on) {
         return Err(CliError::Reported { code: 1 });
+    }
+    Ok(())
+}
+
+/// Report a verdict to the dashboard so the demo list can show staleness.
+///
+/// Push, not poll: the check runs here, in the customer's CI, against their own
+/// app with their own session. The server never reaches the app and holds no
+/// credentials that could — it only records what was sent.
+async fn push_verdict(
+    server: &str,
+    token: &str,
+    demo_id: &str,
+    asset: &DriftAsset,
+) -> Result<(), CliError> {
+    let (mut critical, mut content, mut layout) = (0usize, 0usize, 0usize);
+    let mut breaking = Vec::new();
+    for route in &asset.routes {
+        critical += route.summary.critical;
+        content += route.summary.content;
+        layout += route.summary.layout;
+        for f in &route.findings {
+            if f.severity == Severity::Critical {
+                breaking.push(match f.step {
+                    Some(n) => format!("step {n}: {} — {}", f.what, f.detail),
+                    None => format!("{} — {}", f.what, f.detail),
+                });
+            }
+        }
+    }
+
+    let body = serde_json::json!({
+        "verdict": asset.verdict,
+        "critical": critical,
+        "content": content,
+        "layout": layout,
+        "breaking": breaking,
+    });
+
+    let url = format!("{}/api/demos/{demo_id}/drift", server.trim_end_matches('/'));
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| CliError::Upload(format!("could not reach {url}: {e}")))?;
+
+    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(CliError::Auth(
+            "API token is invalid or expired. Run `stepshots login` again, \
+             or check --token / STEPSHOTS_TOKEN."
+                .into(),
+        ));
+    }
+    if !resp.status().is_success() {
+        return Err(CliError::Upload(format!(
+            "reporting drift failed ({}): {}",
+            resp.status(),
+            resp.text().await.unwrap_or_default()
+        )));
     }
     Ok(())
 }

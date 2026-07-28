@@ -195,6 +195,23 @@ enum Commands {
         #[arg(long, value_enum, default_value = "stale")]
         fail_on: commands::drift::FailOn,
 
+        /// Report the verdict to the dashboard for this demo, so the demo list
+        /// shows staleness. Requires exactly one asset.
+        #[arg(long, value_name = "DEMO_ID")]
+        push: Option<String>,
+
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+
+        /// API token (defaults to the stored login token)
+        #[arg(long, env = "STEPSHOTS_TOKEN")]
+        token: Option<String>,
+
         /// Persistent browser profile directory (for authenticated apps)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
@@ -605,16 +622,45 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             bundles,
             url,
             fail_on,
+            push,
+            server,
+            token,
             profile_dir,
             storage_state,
         } => {
-            // Operates on bundles, not the config — a drift check runs in CI
+            // Operates on assets, not the config — a drift check runs in CI
             // against whatever demos are committed, with no config present.
+            let resolved_token = match push {
+                Some(_) => Some(
+                    token
+                        .clone()
+                        .or_else(|| auth::stored_token_for(&server))
+                        .ok_or_else(|| {
+                            CliError::Auth(
+                                "No API token. Run `stepshots login`, or set STEPSHOTS_TOKEN / use --token."
+                                    .into(),
+                            )
+                        })?,
+                ),
+                None => None,
+            };
+            // A demo id names one demo, so pushing a verdict aggregated over
+            // several assets would attribute the wrong result.
+            if push.is_some() && bundles.len() != 1 {
+                return Err(CliError::Config(
+                    "--push takes exactly one asset, since a demo id names one demo".into(),
+                ));
+            }
+            let push_target = match (push.as_deref(), resolved_token.as_deref()) {
+                (Some(id), Some(tok)) => Some((server.as_str(), tok, id)),
+                _ => None,
+            };
             commands::drift::run(
                 &bundles,
                 url.as_deref(),
                 fail_on,
                 json,
+                push_target,
                 crate::browser::SessionArgs {
                     profile_dir: profile_dir.as_deref(),
                     storage_state: storage_state.as_deref(),
