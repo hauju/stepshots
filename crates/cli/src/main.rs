@@ -80,6 +80,11 @@ enum Commands {
         #[command(subcommand)]
         command: TourCommands,
     },
+    /// Generate and publish AI-rebuilt interactive sandboxes
+    Sandbox {
+        #[command(subcommand)]
+        command: SandboxCommands,
+    },
     /// Record tutorials into .stepshot bundles
     Record {
         /// Tutorials to record (by key). Records all if omitted.
@@ -321,6 +326,59 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum SandboxCommands {
+    /// Generate a sandbox from a recorded bundle, on this machine with your
+    /// own Claude API key (ANTHROPIC_API_KEY). Extracts never leave it.
+    Generate {
+        /// The .stepshot bundle (recorded with --dom)
+        bundle: PathBuf,
+
+        /// Generation brief: product name, tone, what the fake data should say
+        #[arg(long)]
+        brief: Option<String>,
+
+        /// Claude model to generate with (API default: claude-opus-5; the
+        /// agent path uses your Claude Code default unless set)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Output file (default: <bundle>.sandbox.html next to the bundle)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+
+        /// Generate through your local Claude Code agent even when
+        /// ANTHROPIC_API_KEY is set
+        #[arg(long)]
+        agent: bool,
+    },
+    /// Upload a reviewed sandbox artifact to your dashboard
+    Push {
+        /// The generated sandbox HTML file
+        artifact: PathBuf,
+
+        /// The uploaded demo this sandbox was generated from
+        #[arg(long)]
+        demo_id: String,
+
+        /// Sandbox title (default: derived from the demo)
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+
+        /// API token (defaults to the stored login token)
+        #[arg(long, env = "STEPSHOTS_TOKEN")]
+        token: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum TourCommands {
     /// Scaffold a guided-tour source file (optionally from a recorded bundle)
     Init {
@@ -480,6 +538,51 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Schema => {
             commands::schema::run()?;
         }
+        Commands::Sandbox { command } => match command {
+            SandboxCommands::Generate {
+                bundle,
+                brief,
+                model,
+                output,
+                agent,
+            } => {
+                commands::sandbox::generate(
+                    &bundle,
+                    brief.as_deref(),
+                    model.as_deref(),
+                    output.as_deref(),
+                    agent,
+                    json,
+                    cli.verbose,
+                )
+                .await?;
+            }
+            SandboxCommands::Push {
+                artifact,
+                demo_id,
+                title,
+                server,
+                token,
+            } => {
+                let token = token
+                    .or_else(|| auth::stored_token_for(&server))
+                    .ok_or_else(|| {
+                        CliError::Auth(
+                            "No API token. Run `stepshots login`, or set STEPSHOTS_TOKEN / use --token."
+                                .into(),
+                        )
+                    })?;
+                commands::sandbox::push(
+                    &artifact,
+                    &demo_id,
+                    title.as_deref(),
+                    json,
+                    &server,
+                    &token,
+                )
+                .await?;
+            }
+        },
         Commands::Tour { command } => match command {
             TourCommands::Init {
                 key,

@@ -7,6 +7,7 @@ pub mod list;
 pub mod patch;
 pub mod preview;
 pub mod record;
+pub mod sandbox;
 pub mod schema;
 pub mod serve;
 pub mod tour;
