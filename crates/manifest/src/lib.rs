@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 pub mod dom;
+pub mod sandbox;
 pub use dom::{
     AssetRef, DOM_EXTRACT_VERSION, DomExtract, DomNode, DomNodeKind, DomStats, DomTokens,
 };
+pub use sandbox::validate_sandbox_html;
 
 // ============================================================================
 // Recording config types (stepshots.config.json — shared across CLI, extension, etc.)
