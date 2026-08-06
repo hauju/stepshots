@@ -1,13 +1,24 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use chromiumoxide::Page;
 use chromiumoxide::browser::{Browser as CdpBrowser, BrowserConfig};
+use chromiumoxide::handler::HandlerConfig;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::target::TargetId;
 use futures::StreamExt;
 use manifest::{ElementBounds, Point2D, Viewport};
 
 use crate::error::CliError;
+
+/// When set (`--connect` / `STEPSHOTS_CONNECT`), `Browser::launch` attaches to
+/// an already-running Chrome at this DevTools target instead of spawning an
+/// automated instance. Lets recordings run in a browser the user started
+/// themselves, with its existing logged-in sessions.
+static CONNECT_TARGET: OnceLock<String> = OnceLock::new();
+
+pub fn set_connect_target(target: String) {
+    let _ = CONNECT_TARGET.set(target);
+}
 
 /// Wrapper around a CDP browser instance.
 pub struct Browser {
@@ -29,6 +40,15 @@ impl Browser {
         headless: bool,
         profile_dir: Option<&std::path::Path>,
     ) -> Result<Self, CliError> {
+        if let Some(target) = CONNECT_TARGET.get() {
+            if profile_dir.is_some() {
+                eprintln!(
+                    "Warning: --profile-dir is ignored with --connect; the attached browser uses its own profile."
+                );
+            }
+            return Self::connect(viewport, target).await;
+        }
+
         let device_scale_factor = viewport.device_scale_factor.unwrap_or(1.0);
         let mut builder = BrowserConfig::builder()
             .window_size(viewport.width, viewport.height)
@@ -80,6 +100,68 @@ impl Browser {
                  or set CHROME_PATH to the executable. Run `stepshots doctor` to check your setup."
             ))
         })?;
+
+        let handle = tokio::spawn(async move {
+            while let Some(event) = handler.next().await {
+                let _ = event;
+            }
+        });
+
+        let page = browser
+            .new_page("about:blank")
+            .await
+            .map_err(|e| CliError::Browser(format!("Failed to open page: {e}")))?;
+
+        Ok(Self {
+            browser: Arc::new(browser),
+            _handle: handle,
+            page: std::sync::Mutex::new(Arc::new(page)),
+        })
+    }
+
+    /// Attach to an already-running Chrome via its DevTools endpoint and open
+    /// a new tab there. The browser keeps its own profile (existing logins),
+    /// is never closed by stepshots, and the tab stays open when the command
+    /// finishes. Viewport emulation is applied per-tab, so screenshots have
+    /// the exact configured dimensions regardless of the window size.
+    async fn connect(viewport: &Viewport, target: &str) -> Result<Self, CliError> {
+        let url = if target.starts_with("ws://")
+            || target.starts_with("wss://")
+            || target.starts_with("http://")
+            || target.starts_with("https://")
+        {
+            target.to_string()
+        } else if target.chars().all(|c| c.is_ascii_digit()) {
+            format!("http://127.0.0.1:{target}")
+        } else {
+            format!("http://{target}")
+        };
+
+        let device_scale_factor = viewport.device_scale_factor.unwrap_or(1.0);
+        let config = HandlerConfig {
+            viewport: Some(chromiumoxide::handler::viewport::Viewport {
+                width: viewport.width,
+                height: viewport.height,
+                device_scale_factor: Some(device_scale_factor),
+                emulating_mobile: false,
+                is_landscape: false,
+                has_touch: false,
+            }),
+            ..Default::default()
+        };
+
+        let (browser, mut handler) =
+            CdpBrowser::connect_with_config(url.clone(), config)
+                .await
+                .map_err(|e| {
+                    CliError::Browser(format!(
+                        "Failed to attach to a running Chrome at {url}: {e}. Start Chrome with \
+                         remote debugging on a dedicated profile (Chrome 136+ refuses it on the \
+                         default one), e.g.:\n  open -na 'Google Chrome' --args \
+                         --remote-debugging-port=9222 --user-data-dir=\"$HOME/.stepshots-chrome\"\n\
+                         then log in to the sites you need and re-run with --connect 9222."
+                    ))
+                })?;
 
         let handle = tokio::spawn(async move {
             while let Some(event) = handler.next().await {

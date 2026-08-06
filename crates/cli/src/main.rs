@@ -32,6 +32,13 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Attach to an already-running Chrome (with its logged-in sessions)
+    /// instead of launching an automated one. Takes a DevTools debugging
+    /// port (e.g. 9222) or an http(s)/ws URL. Start Chrome with
+    /// --remote-debugging-port=9222 and a dedicated --user-data-dir first.
+    #[arg(long, global = true, env = "STEPSHOTS_CONNECT", value_name = "PORT_OR_URL")]
+    connect: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -397,6 +404,9 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<(), CliError> {
     let json = cli.json;
+    if let Some(target) = cli.connect.clone() {
+        browser::set_connect_target(target);
+    }
     match cli.command {
         Commands::Login { server } => {
             auth::login(&server).await?;
