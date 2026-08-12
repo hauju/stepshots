@@ -42,7 +42,7 @@ OUTPUT SHAPE — validated mechanically after generation:
 - All in-sandbox navigation goes through elements carrying data-nav="ROUTE" with ROUTE from the allowed list; a small inline router toggles the matching section. The first route in the list is shown initially.
 - Inert captured links carry data-inert (no data-nav, no href).
 - The document is fully self-contained: all CSS in <style>, all behavior in inline <script>. No external requests of any kind — no src or href pointing at http(s) URLs, no @import, no url(http...), no fetch/XMLHttpRequest/WebSocket, no web fonts. Captured font families degrade to the closest system-font stack.
-- Captured images become correctly-sized placeholder blocks using each image's captured dominant color. Captured <canvas>/chart nodes become inline SVG charts with invented, plausible series using the captured palette.
+- Captured images become correctly-sized placeholder blocks using each image's captured dominant color — a plain block or a subtle CSS gradient with NOTHING written inside it. The words "missing", "unavailable", "placeholder", "no image", or any equivalent must never appear in visible copy anywhere in the document: a viewer must read an image region as content, never as an apology for content. Captured <canvas>/chart nodes become inline SVG charts with invented, plausible series using the captured palette.
 
 INTERACTIVITY: the sandbox must feel real within each page. Tabs switch, filters filter, dropdowns open, inputs accept text, toggles toggle, buttons respond with plausible state changes. Prefer breadth of small working interactions over one deep flow."#;
 
