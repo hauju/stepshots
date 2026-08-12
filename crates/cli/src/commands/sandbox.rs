@@ -347,51 +347,69 @@ async fn generate_via_agent(
     );
     std::fs::write(workdir.join("task.md"), &task)?;
 
-    let mut cmd = tokio::process::Command::new("claude");
-    cmd.current_dir(&workdir)
-        .arg("-p")
-        .arg("Read task.md in the current directory and do exactly what it says: study the referenced dom/*.json extracts and steps/* screenshots, then write the finished single-file sandbox to sandbox.html here. Do not print the HTML to stdout.")
-        .arg("--allowedTools")
-        .arg("Read,Write,Glob")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    if let Some(model) = model {
-        cmd.arg("--model").arg(model);
-    }
+    // Claude Code occasionally dies right at startup with a bare exit 1
+    // (observed three times across generations); one automatic retry absorbs
+    // that without the user re-running a 25-minute command by hand.
+    let mut last_err = String::new();
+    for attempt in 1..=2u8 {
+        let mut cmd = tokio::process::Command::new("claude");
+        cmd.current_dir(&workdir)
+            .arg("-p")
+            .arg("Read task.md in the current directory and do exactly what it says: study the referenced dom/*.json extracts and steps/* screenshots, then write the finished single-file sandbox to sandbox.html here. Do not print the HTML to stdout.")
+            .arg("--allowedTools")
+            .arg("Read,Write,Glob")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(model) = model {
+            cmd.arg("--model").arg(model);
+        }
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| CliError::Other(format!("Could not launch Claude Code: {e}")))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| CliError::Other(format!("Could not launch Claude Code: {e}")))?;
 
-    // A full generation is minutes of agent work; cap it well above that so a
-    // hung agent cannot pin the terminal forever.
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(1500),
-        child.wait_with_output(),
-    )
-    .await
-    .map_err(|_| CliError::Other("Claude Code timed out after 25 minutes".into()))?
-    .map_err(|e| CliError::Other(format!("Claude Code failed: {e}")))?;
-
-    if verbose {
-        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
-    }
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CliError::Other(format!(
-            "Claude Code exited with {}: {}",
-            output.status,
-            stderr.chars().take(400).collect::<String>()
-        )));
-    }
-
-    let html = std::fs::read_to_string(workdir.join("sandbox.html")).map_err(|_| {
-        CliError::Other(
-            "The agent finished without writing sandbox.html — try again, or use an API key (ANTHROPIC_API_KEY)".into(),
+        // A full generation is minutes of agent work; cap it well above that so a
+        // hung agent cannot pin the terminal forever.
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(1500),
+            child.wait_with_output(),
         )
-    })?;
-    let _ = std::fs::remove_dir_all(&workdir);
-    Ok(html)
+        .await
+        .map_err(|_| CliError::Other("Claude Code timed out after 25 minutes".into()))?
+        .map_err(|e| CliError::Other(format!("Claude Code failed: {e}")))?;
+
+        if verbose {
+            eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        if output.status.success() {
+            let html = std::fs::read_to_string(workdir.join("sandbox.html")).map_err(|_| {
+                CliError::Other(
+                    "The agent finished without writing sandbox.html — try again, or use an API key (ANTHROPIC_API_KEY)".into(),
+                )
+            })?;
+            let _ = std::fs::remove_dir_all(&workdir);
+            return Ok(html);
+        }
+
+        // Claude Code reports its errors on STDOUT; stderr is usually empty.
+        // Surface the tails of both or the failure reads as mute.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = [stderr.trim(), stdout.trim()]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().take(400).collect::<String>())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        last_err = format!("Claude Code exited with {}: {detail}", output.status);
+        if attempt == 1 {
+            eprintln!(
+                "  Generation attempt failed ({}) — retrying once …",
+                output.status
+            );
+        }
+    }
+    Err(CliError::Other(last_err))
 }
 
 /// Pull the HTML document out of the model's text, tolerating a stray fence.
