@@ -88,7 +88,14 @@ pub(crate) async fn upload_one(
             return Err(CliError::Upload(format!("File not found: {file_path}")));
         }
 
-        let bundle_bytes = std::fs::read(path)?;
+        let raw_bytes = std::fs::read(path)?;
+        // DOM extracts are generation input for `sandbox generate`, which runs
+        // locally — the server never needs them, so they never leave the
+        // machine. The strip is a no-op for bundles recorded without --dom.
+        let bundle_bytes = super::sandbox::strip_dom_extracts(&raw_bytes)?;
+        if bundle_bytes.len() != raw_bytes.len() && !json {
+            println!("  (DOM extracts stay local — stripped from the upload)");
+        }
         let bundle_file_name = path
             .file_name()
             .and_then(|n| n.to_str())

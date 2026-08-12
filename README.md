@@ -142,6 +142,41 @@ stepshots record --tutorial my-tutorial --profile-dir ~/.stepshots/profile
 
 Set `STEPSHOTS_PROFILE_DIR` to avoid repeating the flag. Use a dedicated profile directory — never your regular Chrome profile.
 
+#### Logged-in flows in CI
+
+A browser profile can't travel to CI: it's bulky and binary, tied to a machine and a Chrome version, it holds live session tokens so it must never be committed, and the session inside it expires anyway. For CI, hand the session over as JSON instead:
+
+```sh
+stepshots verify --storage-state auth.json
+stepshots record --tutorial my-tutorial --storage-state auth.json
+```
+
+The file is Playwright's `storageState` format, so if you already run browser tests you can produce one from your existing login setup:
+
+```js
+await context.storageState({ path: 'auth.json' });
+```
+
+Or write it by hand — every field but `name`/`value` is optional:
+
+```json
+{
+  "cookies": [
+    { "name": "session", "value": "…", "domain": "app.example.com", "path": "/" }
+  ],
+  "origins": [
+    {
+      "origin": "https://app.example.com",
+      "localStorage": [{ "name": "token", "value": "…" }]
+    }
+  ]
+}
+```
+
+Cookies are applied before the first navigation, and `localStorage` is restored by a script that runs before page scripts on every document — so the first page you land on is already authenticated.
+
+**Generate it during the CI run and never commit it.** It is credentials in JSON form. `STEPSHOTS_STORAGE_STATE` sets the path if you'd rather not repeat the flag.
+
 ### Amend a recording (one-shot flows)
 
 Some flows can't be re-recorded — a signup wizard you can only complete once, a destructive action, a third-party app. `stepshots patch` amends an existing `.stepshot` bundle with manually captured steps instead: it opens a visible browser locked to the bundle's viewport (so captures match pixel-for-pixel), you stage each page by hand and press Enter to capture, then Ctrl+C saves the bundle (a backup of the original is kept next to it).

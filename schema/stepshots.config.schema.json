@@ -15,6 +15,20 @@
       "description": "Base URL prepended to every relative tutorial and step URL, e.g. \"https://app.example.com\".",
       "type": "string"
     },
+    "captureDom": {
+      "description": "Capture a DOM structural extract alongside each screenshot, as input to\nthe sandbox generator. Off by default. Equivalent to `record --dom`.\n\nExtracts carry real page text, so they are redacted at capture time and\nnever served to demo viewers. See `docs/dom-extract-spec.md`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "captureInputValues": {
+      "description": "Include `input`/`textarea`/`select` values in DOM extracts. Off by\ndefault; password fields are never captured regardless of this setting.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "defaultDelay": {
       "description": "Milliseconds to wait after each action before capturing, unless a step sets its own `delay`.",
       "type": "integer",
@@ -32,6 +46,13 @@
           "type": "null"
         }
       ]
+    },
+    "redactSelectors": {
+      "description": "CSS selectors whose subtrees are elided from DOM extracts entirely.\nApplies on top of blur regions, which redact by geometry.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "theme": {
       "description": "Color scheme for recording: \"dark\" or \"light\". Defaults to browser default.",

@@ -18,9 +18,24 @@ pub async fn run(
     url: Option<&str>,
     profile_dir: Option<&Path>,
 ) -> Result<(), CliError> {
-    let (mut manifest, screenshots, frames) = read_bundle(bundle_path)?;
+    let (mut manifest, screenshots, frames, dom_extracts) = read_bundle(bundle_path)?;
     let mode = resolve_mode(manifest.steps.len(), replace, at)?;
-    let steps = std::mem::take(&mut manifest.steps);
+    let mut steps = std::mem::take(&mut manifest.steps);
+
+    // Patching invalidates DOM extracts: `replace` swaps the screenshot out from
+    // under one, and append/insert shift every later index. A step whose extract
+    // and screenshot disagree would silently poison sandbox generation, so the
+    // whole set is dropped and must be re-recorded.
+    if !dom_extracts.is_empty() {
+        println!(
+            "Note: dropping {} DOM extract(s) — patching invalidates them. Re-record with --dom to regenerate.",
+            dom_extracts.len()
+        );
+    }
+    for step in &mut steps {
+        step.dom = None;
+    }
+
     let mut records = to_records(steps, screenshots, frames);
 
     let name = bundle_path
@@ -294,6 +309,8 @@ fn new_manual_step(url: Option<String>, base_url: Option<&str>) -> BundleManifes
         value: None,
         delay: None,
         transition_frames: None,
+        // Manually captured: there is no recording pass to extract from.
+        dom: None,
     }
 }
 
@@ -345,7 +362,8 @@ fn save(
 ) -> Result<std::path::PathBuf, CliError> {
     let tmp = bundle_path.with_extension("stepshot.tmp");
     let bak = bundle_path.with_extension("stepshot.bak");
-    create_bundle(manifest, screenshots, frames, &tmp)?;
+    // No DOM extracts: `run` drops them, since patching invalidates them.
+    create_bundle(manifest, screenshots, frames, &HashMap::new(), &tmp)?;
     std::fs::copy(bundle_path, &bak)?;
     std::fs::rename(&tmp, bundle_path)?;
     Ok(bak)

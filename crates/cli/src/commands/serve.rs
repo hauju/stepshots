@@ -140,8 +140,17 @@ async fn handle_record(
     let output_path = output_dir.join(format!("{}.stepshot", req.tutorial_name));
 
     let viewport = manifest::resolve_viewport(req.config.format.as_ref(), &req.config.viewport);
-    match record::record_tutorial(&req.config, &tutorial, &viewport, &output_path, false, None)
-        .await
+    // No profile and no seeded session: the extension records what the browser
+    // it is driving already has.
+    match record::record_tutorial(
+        &req.config,
+        &tutorial,
+        &viewport,
+        &output_path,
+        false,
+        crate::browser::SessionSource::default(),
+    )
+    .await
     {
         Ok((_, None)) => {
             let dir = output_dir

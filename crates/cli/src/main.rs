@@ -4,8 +4,11 @@ mod browser;
 mod bundler;
 mod commands;
 mod config;
+mod dom_extract;
+mod drift;
 mod error;
 pub mod output;
+mod storage_state;
 
 use std::path::PathBuf;
 
@@ -89,6 +92,11 @@ enum Commands {
         #[command(subcommand)]
         command: TourCommands,
     },
+    /// Generate and publish AI-rebuilt interactive sandboxes
+    Sandbox {
+        #[command(subcommand)]
+        command: SandboxCommands,
+    },
     /// Record tutorials into .stepshot bundles
     Record {
         /// Tutorials to record (by key). Records all if omitted.
@@ -107,9 +115,25 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
 
+        /// Capture a DOM structural extract alongside each screenshot, as input
+        /// to the sandbox generator. Overrides `captureDom` in the config.
+        ///
+        /// Extracts carry real page text. They are redacted at capture time
+        /// (blur regions, `redactSelectors`, PII scrub) and are stripped from
+        /// the public bundle on publish — never served to demo viewers.
+        #[arg(long)]
+        dom: bool,
+
         /// Persistent browser profile directory (for authenticated recordings)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
+
+        /// Session state JSON — cookies and localStorage in Playwright's
+        /// `storageState` format. Use instead of --profile-dir in CI, where a
+        /// browser profile cannot travel: regenerate the file each run from
+        /// your existing login setup.
+        #[arg(long, value_name = "PATH", env = "STEPSHOTS_STORAGE_STATE")]
+        storage_state: Option<PathBuf>,
     },
     /// List the tutorials defined in the config
     List,
@@ -165,6 +189,54 @@ enum Commands {
         /// Persistent browser profile directory (for authenticated flows)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
+
+        /// Session state JSON — cookies and localStorage in Playwright's
+        /// `storageState` format. Use instead of --profile-dir in CI, where a
+        /// browser profile cannot travel: regenerate the file each run from
+        /// your existing login setup.
+        #[arg(long, value_name = "PATH", env = "STEPSHOTS_STORAGE_STATE")]
+        storage_state: Option<PathBuf>,
+    },
+    /// Check recorded demos against the live app by diffing DOM extracts
+    /// (no replay — sees changes no step points at, and never cascades)
+    Drift {
+        /// .stepshot bundles or *.tour.json files to check
+        #[arg(value_name = "ASSET", required = true)]
+        bundles: Vec<PathBuf>,
+
+        /// Base URL to check against (default: the bundle's own baseUrl)
+        #[arg(long)]
+        url: Option<String>,
+
+        /// Exit non-zero on: stale (a step's target is gone) or drifted (any change)
+        #[arg(long, value_enum, default_value = "stale")]
+        fail_on: commands::drift::FailOn,
+
+        /// Report the verdict to the dashboard for this demo, so the demo list
+        /// shows staleness. Requires exactly one asset.
+        #[arg(long, value_name = "DEMO_ID")]
+        push: Option<String>,
+
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+
+        /// API token (defaults to the stored login token)
+        #[arg(long, env = "STEPSHOTS_TOKEN")]
+        token: Option<String>,
+
+        /// Persistent browser profile directory (for authenticated apps)
+        #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
+        profile_dir: Option<PathBuf>,
+
+        /// Session state JSON — cookies and localStorage in Playwright's
+        /// `storageState` format. Use instead of --profile-dir in CI.
+        #[arg(long, value_name = "PATH", env = "STEPSHOTS_STORAGE_STATE")]
+        storage_state: Option<PathBuf>,
     },
     /// Serve the Stepshots tools over MCP on stdio, for AI agents
     /// (e.g. `claude mcp add stepshots -- stepshots mcp`)
@@ -265,6 +337,59 @@ enum Commands {
         /// Output directory for recorded bundles
         #[arg(long, short, default_value = "output")]
         output: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SandboxCommands {
+    /// Generate a sandbox from a recorded bundle, on this machine with your
+    /// own Claude API key (ANTHROPIC_API_KEY). Extracts never leave it.
+    Generate {
+        /// The .stepshot bundle (recorded with --dom)
+        bundle: PathBuf,
+
+        /// Generation brief: product name, tone, what the fake data should say
+        #[arg(long)]
+        brief: Option<String>,
+
+        /// Claude model to generate with (API default: claude-opus-5; the
+        /// agent path uses your Claude Code default unless set)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Output file (default: <bundle>.sandbox.html next to the bundle)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+
+        /// Generate through your local Claude Code agent even when
+        /// ANTHROPIC_API_KEY is set
+        #[arg(long)]
+        agent: bool,
+    },
+    /// Upload a reviewed sandbox artifact to your dashboard
+    Push {
+        /// The generated sandbox HTML file
+        artifact: PathBuf,
+
+        /// The uploaded demo this sandbox was generated from
+        #[arg(long)]
+        demo_id: String,
+
+        /// Sandbox title (default: derived from the demo)
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Server URL
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+
+        /// API token (defaults to the stored login token)
+        #[arg(long, env = "STEPSHOTS_TOKEN")]
+        token: Option<String>,
     },
 }
 
@@ -431,6 +556,51 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Commands::Schema => {
             commands::schema::run()?;
         }
+        Commands::Sandbox { command } => match command {
+            SandboxCommands::Generate {
+                bundle,
+                brief,
+                model,
+                output,
+                agent,
+            } => {
+                commands::sandbox::generate(
+                    &bundle,
+                    brief.as_deref(),
+                    model.as_deref(),
+                    output.as_deref(),
+                    agent,
+                    json,
+                    cli.verbose,
+                )
+                .await?;
+            }
+            SandboxCommands::Push {
+                artifact,
+                demo_id,
+                title,
+                server,
+                token,
+            } => {
+                let token = token
+                    .or_else(|| auth::stored_token_for(&server))
+                    .ok_or_else(|| {
+                        CliError::Auth(
+                            "No API token. Run `stepshots login`, or set STEPSHOTS_TOKEN / use --token."
+                                .into(),
+                        )
+                    })?;
+                commands::sandbox::push(
+                    &artifact,
+                    &demo_id,
+                    title.as_deref(),
+                    json,
+                    &server,
+                    &token,
+                )
+                .await?;
+            }
+        },
         Commands::Tour { command } => match command {
             TourCommands::Init {
                 key,
@@ -507,12 +677,18 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             tutorial,
             output,
             dry_run,
+            dom,
             profile_dir,
+            storage_state,
         } => {
             let mut selected = tutorials;
             selected.extend(tutorial);
             let config_path = config::find_config(cli.config.as_deref())?;
-            let config = config::load_config(&config_path)?;
+            let mut config = config::load_config(&config_path)?;
+            // The flag turns capture on; it never turns a config opt-in off.
+            if dom {
+                config.capture_dom = Some(true);
+            }
             if !json {
                 println!("Using config: {}", config_path.display());
             }
@@ -522,7 +698,10 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 &output,
                 dry_run,
                 json,
-                profile_dir.as_deref(),
+                crate::browser::SessionArgs {
+                    profile_dir: profile_dir.as_deref(),
+                    storage_state: storage_state.as_deref(),
+                },
             )
             .await?;
         }
@@ -563,12 +742,63 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             commands::patch::run(&bundle, replace, at, url.as_deref(), profile_dir.as_deref())
                 .await?;
         }
+        Commands::Drift {
+            bundles,
+            url,
+            fail_on,
+            push,
+            server,
+            token,
+            profile_dir,
+            storage_state,
+        } => {
+            // Operates on assets, not the config — a drift check runs in CI
+            // against whatever demos are committed, with no config present.
+            let resolved_token = match push {
+                Some(_) => Some(
+                    token
+                        .clone()
+                        .or_else(|| auth::stored_token_for(&server))
+                        .ok_or_else(|| {
+                            CliError::Auth(
+                                "No API token. Run `stepshots login`, or set STEPSHOTS_TOKEN / use --token."
+                                    .into(),
+                            )
+                        })?,
+                ),
+                None => None,
+            };
+            // A demo id names one demo, so pushing a verdict aggregated over
+            // several assets would attribute the wrong result.
+            if push.is_some() && bundles.len() != 1 {
+                return Err(CliError::Config(
+                    "--push takes exactly one asset, since a demo id names one demo".into(),
+                ));
+            }
+            let push_target = match (push.as_deref(), resolved_token.as_deref()) {
+                (Some(id), Some(tok)) => Some((server.as_str(), tok, id)),
+                _ => None,
+            };
+            commands::drift::run(
+                &bundles,
+                url.as_deref(),
+                fail_on,
+                json,
+                push_target,
+                crate::browser::SessionArgs {
+                    profile_dir: profile_dir.as_deref(),
+                    storage_state: storage_state.as_deref(),
+                },
+            )
+            .await?;
+        }
         Commands::Verify {
             tutorials,
             tutorial,
             save_failures,
             fail_on,
             profile_dir,
+            storage_state,
         } => {
             let mut selected = tutorials;
             selected.extend(tutorial);
@@ -584,7 +814,10 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 &save_failures,
                 fail_on,
                 json,
-                profile_dir.as_deref(),
+                crate::browser::SessionArgs {
+                    profile_dir: profile_dir.as_deref(),
+                    storage_state: storage_state.as_deref(),
+                },
             )
             .await?;
         }
