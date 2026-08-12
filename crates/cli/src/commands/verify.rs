@@ -121,7 +121,10 @@ pub(crate) async fn collect(
                 key,
                 save_failures,
                 true,
-                profile_dir,
+                crate::browser::SessionSource {
+                    profile_dir,
+                    storage_state: None,
+                },
             )
             .await?,
         );

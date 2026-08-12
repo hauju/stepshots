@@ -231,7 +231,10 @@ impl StepshotsMcp {
                 &viewport,
                 &output_path,
                 true,
-                profile_dir.as_deref(),
+                crate::browser::SessionSource {
+                    profile_dir: profile_dir.as_deref(),
+                    storage_state: None,
+                },
             )
             .await
             {
