@@ -36,7 +36,12 @@ struct Cli {
     /// instead of launching an automated one. Takes a DevTools debugging
     /// port (e.g. 9222) or an http(s)/ws URL. Start Chrome with
     /// --remote-debugging-port=9222 and a dedicated --user-data-dir first.
-    #[arg(long, global = true, env = "STEPSHOTS_CONNECT", value_name = "PORT_OR_URL")]
+    #[arg(
+        long,
+        global = true,
+        env = "STEPSHOTS_CONNECT",
+        value_name = "PORT_OR_URL"
+    )]
     connect: Option<String>,
 
     #[command(subcommand)]
@@ -161,6 +166,9 @@ enum Commands {
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
     },
+    /// Serve the Stepshots tools over MCP on stdio, for AI agents
+    /// (e.g. `claude mcp add stepshots -- stepshots mcp`)
+    Mcp,
     /// Open a visible browser with a saved profile to log in to sites
     /// used by authenticated recordings
     Browser {
@@ -517,6 +525,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 profile_dir.as_deref(),
             )
             .await?;
+        }
+        Commands::Mcp => {
+            commands::mcp::run(cli.config.clone()).await?;
         }
         Commands::List => {
             let config_path = config::find_config(cli.config.as_deref())?;

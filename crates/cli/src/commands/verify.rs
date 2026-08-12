@@ -94,6 +94,47 @@ pub async fn run(
     Ok(())
 }
 
+/// Run the same verification loop as [`run`] but return the report instead of
+/// printing it. The MCP server (`stepshots mcp`) calls this because its stdout
+/// carries the JSON-RPC stream and must stay untouched.
+pub(crate) async fn collect(
+    config: &StepshotsConfig,
+    config_path: &Path,
+    tutorials: &[String],
+    save_failures: &Path,
+    fail_on: FailOn,
+    profile_dir: Option<&Path>,
+) -> Result<VerifyOutput, CliError> {
+    let selected = select_tutorials(config, tutorials)?;
+    let viewport = resolve_viewport(config.format.as_ref(), &config.viewport);
+
+    let mut results: Vec<VerifyTutorial> = Vec::with_capacity(selected.len());
+    for (key, tutorial) in &selected {
+        results.push(
+            verify_tutorial(
+                config,
+                tutorial,
+                &viewport,
+                key,
+                save_failures,
+                true,
+                profile_dir,
+            )
+            .await?,
+        );
+    }
+
+    let summary = summarize(&results);
+    let success = !exits_nonzero(&summary, fail_on);
+    Ok(VerifyOutput {
+        success,
+        command: "verify",
+        config: config_path.display().to_string(),
+        summary,
+        tutorials: results,
+    })
+}
+
 /// Verify a single tutorial. Only browser-level problems (launch failure)
 /// return `Err`; a start page that no longer loads is itself drift and is
 /// reported in the returned [`VerifyTutorial`].

@@ -2,9 +2,9 @@ use std::sync::{Arc, OnceLock};
 
 use chromiumoxide::Page;
 use chromiumoxide::browser::{Browser as CdpBrowser, BrowserConfig};
-use chromiumoxide::handler::HandlerConfig;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::target::TargetId;
+use chromiumoxide::handler::HandlerConfig;
 use futures::StreamExt;
 use manifest::{ElementBounds, Point2D, Viewport};
 
@@ -150,18 +150,17 @@ impl Browser {
             ..Default::default()
         };
 
-        let (browser, mut handler) =
-            CdpBrowser::connect_with_config(url.clone(), config)
-                .await
-                .map_err(|e| {
-                    CliError::Browser(format!(
-                        "Failed to attach to a running Chrome at {url}: {e}. Start Chrome with \
+        let (browser, mut handler) = CdpBrowser::connect_with_config(url.clone(), config)
+            .await
+            .map_err(|e| {
+                CliError::Browser(format!(
+                    "Failed to attach to a running Chrome at {url}: {e}. Start Chrome with \
                          remote debugging on a dedicated profile (Chrome 136+ refuses it on the \
                          default one), e.g.:\n  open -na 'Google Chrome' --args \
                          --remote-debugging-port=9222 --user-data-dir=\"$HOME/.stepshots-chrome\"\n\
                          then log in to the sites you need and re-run with --connect 9222."
-                    ))
-                })?;
+                ))
+            })?;
 
         let handle = tokio::spawn(async move {
             while let Some(event) = handler.next().await {

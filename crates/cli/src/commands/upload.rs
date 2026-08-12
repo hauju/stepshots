@@ -30,6 +30,59 @@ pub async fn run(
     let mut results = Vec::new();
 
     for file_path in files {
+        results.push(
+            upload_one(
+                &client,
+                file_path,
+                title_override,
+                replace_demo_id,
+                public,
+                json,
+                server_url,
+                token,
+            )
+            .await?,
+        );
+    }
+
+    if json {
+        let out = UploadOutput {
+            success: true,
+            command: "upload",
+            demos: results
+                .iter()
+                .map(|r| UploadedDemo {
+                    demo_id: r.demo_id.clone(),
+                    view_url: r.view_url.clone(),
+                    replaced: replace_demo_id.is_some(),
+                })
+                .collect(),
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).expect("serializing UploadOutput")
+        );
+    }
+
+    Ok(results)
+}
+
+/// Upload or replace a single bundle. `quiet` suppresses all progress output —
+/// the MCP server calls this with `quiet: true` because its stdout carries the
+/// JSON-RPC stream.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn upload_one(
+    client: &reqwest::Client,
+    file_path: &str,
+    title_override: Option<&str>,
+    replace_demo_id: Option<&str>,
+    public: bool,
+    quiet: bool,
+    server_url: &str,
+    token: &str,
+) -> Result<UploadResult, CliError> {
+    let json = quiet;
+    {
         let path = Path::new(file_path);
         if !path.exists() {
             return Err(CliError::Upload(format!("File not found: {file_path}")));
@@ -80,10 +133,10 @@ pub async fn run(
                     println!("  Replaced! Demo ID: {demo_id}");
                     println!("  View at: {view_url}");
                 }
-                results.push(UploadResult {
+                Ok(UploadResult {
                     demo_id: demo_id.to_string(),
                     view_url,
-                });
+                })
             } else {
                 return Err(upload_error("Replace", resp).await);
             }
@@ -151,33 +204,12 @@ pub async fn run(
                         );
                     }
                 }
-                results.push(UploadResult { demo_id, view_url });
+                Ok(UploadResult { demo_id, view_url })
             } else {
                 return Err(upload_error("Upload", resp).await);
             }
         }
     }
-
-    if json {
-        let out = UploadOutput {
-            success: true,
-            command: "upload",
-            demos: results
-                .iter()
-                .map(|r| UploadedDemo {
-                    demo_id: r.demo_id.clone(),
-                    view_url: r.view_url.clone(),
-                    replaced: replace_demo_id.is_some(),
-                })
-                .collect(),
-        };
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&out).expect("serializing UploadOutput")
-        );
-    }
-
-    Ok(results)
 }
 
 /// Send an upload request with bounded retry: connection errors, timeouts and

@@ -204,6 +204,25 @@ stepshots doctor
 
 Verifies your browser (Chrome/Chromium + version), config file, server reachability, and login in one pass — run it first when something misbehaves, and include its output in bug reports.
 
+### MCP server (for AI agents)
+
+```sh
+# Claude Code
+claude mcp add stepshots -- stepshots mcp
+```
+
+`stepshots mcp` serves the recording workflow over the [Model Context Protocol](https://modelcontextprotocol.io) on stdio, so AI agents can drive it as tools: `get_schema` (write or validate a config), `list_tutorials`, `record`, `verify` (drift report with a repair hint per failure), and `upload` (publish, or update an existing demo in place via `demo_id`). Any MCP client works — configure the command `stepshots mcp` with no arguments:
+
+```json
+{
+  "mcpServers": {
+    "stepshots": { "command": "stepshots", "args": ["mcp"] }
+  }
+}
+```
+
+Run it from the project directory containing `stepshots.config.json` (or pass `--config`). Uploading needs a stored login (`stepshots login`) or `STEPSHOTS_TOKEN`.
+
 ### Shell completions
 
 ```sh
