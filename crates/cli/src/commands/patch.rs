@@ -135,9 +135,8 @@ pub async fn run(
     }
 
     let kept = records.len();
-    let summary;
     let mut replace_note = None;
-    match mode {
+    let summary = match mode {
         Mode::Replace(n) => {
             let (bytes, _) = captures.remove(0);
             records[n].screenshot = bytes;
@@ -147,7 +146,7 @@ pub async fn run(
                     n + 1
                 ));
             }
-            summary = format!("{kept} steps: 1 replaced");
+            format!("{kept} steps: 1 replaced")
         }
         Mode::Append | Mode::Insert(_) => {
             let insert_at = match mode {
@@ -166,9 +165,9 @@ pub async fn run(
                     },
                 );
             }
-            summary = format!("{} steps: {kept} kept, {added} added", records.len());
+            format!("{} steps: {kept} kept, {added} added", records.len())
         }
-    }
+    };
 
     let (steps, shots, frames) = reassemble(records);
     manifest.steps = steps;
