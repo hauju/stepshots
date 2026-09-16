@@ -63,16 +63,19 @@ function findVisible(selector: string): HTMLElement | null {
 }
 
 /**
- * Recover a step's target by its recorded identity (aria-label / visible text)
- * when the CSS selector no longer matches — the UI drifted since recording.
- * aria-label is the strongest anchor and is tried first; text falls back to an
- * exact match, then containment. Best-effort: returns null if nothing fits.
+ * Recover a step's target by its recorded identity (aria-label / visible text /
+ * title) when the CSS selector no longer matches — the UI drifted since
+ * recording. aria-label is the strongest anchor and is tried first; text falls
+ * back to an exact match, then containment; `title` is last and rescues
+ * icon-only controls, which have neither of the other two.
+ * Best-effort: returns null if nothing fits.
  */
 function findByFallback(fallback?: TourFallback): HTMLElement | null {
   if (!fallback) return null;
   const wantAria = fallback.aria?.trim().toLowerCase();
   const wantText = fallback.text?.trim().toLowerCase();
-  if (!wantAria && !wantText) return null;
+  const wantTitle = fallback.title?.trim().toLowerCase();
+  if (!wantAria && !wantText && !wantTitle) return null;
 
   if (wantAria) {
     const els = document.querySelectorAll<HTMLElement>("[aria-label]");
@@ -97,6 +100,19 @@ function findByFallback(fallback?: TourFallback): HTMLElement | null {
       if (text.includes(wantText)) partial.push(el);
     }
     if (partial.length === 1) return partial[0];
+  }
+
+  if (wantTitle) {
+    // Tooltips repeat far more often than aria-labels — "Delete" sits on every
+    // row of a table — so a title match is only trusted when it is unique.
+    const els = safeQueryAll("[title]");
+    const hits: HTMLElement[] = [];
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      if (!isVisible(el)) continue;
+      if ((el.getAttribute("title") || "").trim().toLowerCase() === wantTitle) hits.push(el);
+    }
+    if (hits.length === 1) return hits[0];
   }
   return null;
 }

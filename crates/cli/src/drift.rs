@@ -17,6 +17,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use manifest::{BundleManifestStep, DomExtract, DomNode};
 use serde::Serialize;
 
+/// First extract version whose walker captures `title`. A baseline recorded
+/// before this has no titles to anchor on, so enabling the rung against it
+/// would re-key every icon-only node from `path:` to `title:` on the live side
+/// alone — every upgraded CLI would report drift on an app that never changed.
+const TITLE_ANCHOR_VERSION: u32 = 2;
+
 /// Movement below this many pixels is sub-pixel/antialiasing noise, not drift.
 const MOVE_TOLERANCE_PX: f64 = 4.0;
 /// Own text longer than this is treated as content rather than identity — long
@@ -102,17 +108,29 @@ impl StepDrift {
 /// the original string, so a value that merely *changed length* — `$1,284` to
 /// `$12,847` — would otherwise produce a different key and read as one element
 /// removed and another added. Every live dashboard would show permanent drift.
-fn anchor_of(node: &DomNode, path: &str) -> String {
+fn anchor_of(node: &DomNode, path: &str, use_title: bool) -> String {
     if node.redacted == Some(true) {
         return format!("path:{path}");
     }
     if let Some(aria) = &node.aria {
         return format!("aria:{aria}");
     }
-    match &node.txt {
-        Some(txt) if txt.chars().count() < MAX_ANCHOR_TEXT => format!("txt:{txt}"),
-        _ => format!("path:{path}"),
+    if let Some(txt) = &node.txt
+        && txt.chars().count() < MAX_ANCHOR_TEXT
+    {
+        return format!("txt:{txt}");
     }
+    // Below text deliberately: a control with a visible label is identified by
+    // that label. `title` only rescues the nodes that would otherwise fall
+    // through to `path:` — icon-only buttons, which are exactly the ones the
+    // player cannot re-resolve today.
+    if use_title
+        && let Some(title) = &node.title
+        && title.chars().count() < MAX_ANCHOR_TEXT
+    {
+        return format!("title:{title}");
+    }
+    format!("path:{path}")
 }
 
 /// Structural signature: tag plus its first two classes. Survives the usual
@@ -135,14 +153,14 @@ fn signature(node: &DomNode) -> String {
 
 /// Flatten to anchor -> node, disambiguating repeats by occurrence order so
 /// three buttons labelled "1" stay distinguishable across a diff.
-fn index(extract: &DomExtract) -> HashMap<String, DomNode> {
+fn index(extract: &DomExtract, use_title: bool) -> HashMap<String, DomNode> {
     let mut out = HashMap::new();
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut stack = vec![(&extract.root, String::new())];
 
     while let Some((node, parent)) = stack.pop() {
         let path = format!("{parent}/{}", signature(node));
-        let base = anchor_of(node, &path);
+        let base = anchor_of(node, &path, use_title);
         let n = seen.entry(base.clone()).or_insert(0);
         *n += 1;
         let key = if *n == 1 { base } else { format!("{base}#{n}") };
@@ -171,6 +189,9 @@ fn manifest_anchors(steps: &[BundleManifestStep]) -> HashMap<String, usize> {
         if let Some(text) = &step.target_text {
             out.insert(format!("txt:{text}"), i + 1);
         }
+        if let Some(title) = &step.target_title {
+            out.insert(format!("title:{title}"), i + 1);
+        }
     }
     out
 }
@@ -187,6 +208,7 @@ pub fn unanchored_steps(steps: &[BundleManifestStep]) -> Vec<(usize, String)> {
             s.selector.is_some()
                 && s.target_aria.is_none()
                 && s.target_text.is_none()
+                && s.target_title.is_none()
                 && matches!(
                     s.action.as_deref(),
                     Some("click" | "type" | "select" | "hover")
@@ -241,12 +263,19 @@ fn suggest_replacement(gone: &DomNode, added: &[(&String, &DomNode)]) -> Option<
 /// fallback anchors the player would use. Answering "is this anchor still
 /// present" per step, from one capture, gives `tour check`'s verdict without
 /// its replay: a step that can't be reached no longer hides every step after it.
-pub fn has_anchor(extract: &DomExtract, aria: Option<&str>, text: Option<&str>) -> bool {
+pub fn has_anchor(
+    extract: &DomExtract,
+    aria: Option<&str>,
+    text: Option<&str>,
+    title: Option<&str>,
+) -> bool {
     let mut found = false;
+    // Counted, not short-circuited: the player refuses a title that matches more
+    // than one element, so "a title match exists" is not the same question as
+    // "the player can resolve this". Answering the easy one reports a tour as
+    // merely drifted when it is actually dead.
+    let mut title_hits = 0usize;
     extract.visit(&mut |node| {
-        if found {
-            return;
-        }
         if let (Some(want), Some(got)) = (aria, node.aria.as_deref())
             && want == got
         {
@@ -257,8 +286,13 @@ pub fn has_anchor(extract: &DomExtract, aria: Option<&str>, text: Option<&str>) 
         {
             found = true;
         }
+        if let (Some(want), Some(got)) = (title, node.title.as_deref())
+            && want.trim() == got.trim()
+        {
+            title_hits += 1;
+        }
     });
-    found
+    found || title_hits == 1
 }
 
 /// Quantised bounds delta, used as the cascade-collapse grouping key.
@@ -312,8 +346,11 @@ fn describe_delta(d: [i64; 4]) -> String {
 
 /// Diff one step's recorded extract against the live page.
 pub fn diff(before: &DomExtract, after: &DomExtract, steps: &[BundleManifestStep]) -> StepDrift {
-    let a = index(before);
-    let b = index(after);
+    // Both sides or neither: a rung enabled on one side only turns every node
+    // it re-keys into a spurious removed/added pair.
+    let use_title = before.v >= TITLE_ANCHOR_VERSION && after.v >= TITLE_ANCHOR_VERSION;
+    let a = index(before, use_title);
+    let b = index(after, use_title);
     let anchors = manifest_anchors(steps);
     let mut findings = Vec::new();
 
@@ -471,6 +508,7 @@ mod tests {
             txt: None,
             role: None,
             aria: None,
+            title: None,
             kind: None,
             asset: None,
             palette: vec![],
@@ -491,9 +529,16 @@ mod tests {
         n
     }
 
+    /// An icon-only control: no own text, no aria-label, only a tooltip.
+    fn titled(tag: &str, title: &str, b: [f64; 4]) -> DomNode {
+        let mut n = node(tag, b);
+        n.title = Some(title.into());
+        n
+    }
+
     fn extract(root: DomNode) -> DomExtract {
         DomExtract {
-            v: 1,
+            v: manifest::DOM_EXTRACT_VERSION,
             viewport: Viewport {
                 width: 1440,
                 height: 810,
@@ -514,6 +559,16 @@ mod tests {
             "selector": "button",
             "target_aria": aria,
             "target_text": text,
+        }))
+        .unwrap()
+    }
+
+    fn step_titled(title: &str) -> BundleManifestStep {
+        serde_json::from_value(serde_json::json!({
+            "file": "steps/0.webp",
+            "action": "click",
+            "selector": "button",
+            "target_title": title,
         }))
         .unwrap()
     }
@@ -770,5 +825,86 @@ mod tests {
         let un = unanchored_steps(&steps);
         assert_eq!(un.len(), 1);
         assert_eq!(un[0].0, 1);
+    }
+
+    /// A tooltip is identity. Without it an icon-only button anchors on its DOM
+    /// path, so renaming it reads as "moved" rather than as the break it is.
+    #[test]
+    fn tooltip_is_an_anchor_when_nothing_else_is() {
+        let mut before = node("body", [0.0, 0.0, 200.0, 100.0]);
+        before.kids = vec![titled("button", "Blur region", [10.0, 10.0, 20.0, 20.0])];
+        let mut after = node("body", [0.0, 0.0, 200.0, 100.0]);
+        after.kids = vec![titled("button", "Redact region", [10.0, 10.0, 20.0, 20.0])];
+
+        let d = diff(
+            &extract(before),
+            &extract(after),
+            &[step_titled("Blur region")],
+        );
+        let crit = d
+            .findings
+            .iter()
+            .find(|f| f.severity == Severity::Critical)
+            .expect("renaming the tooltip must break the step that anchors on it");
+        assert_eq!(crit.what, "title:Blur region");
+    }
+
+    /// Visible text still wins: adding `title` must not re-key nodes that
+    /// already had a durable anchor, or every existing bundle would drift.
+    #[test]
+    fn text_still_outranks_tooltip() {
+        let mut n = texted("button", "Save", [0.0, 0.0, 10.0, 10.0]);
+        n.title = Some("Save the document".into());
+        let mut root = node("body", [0.0, 0.0, 100.0, 100.0]);
+        root.kids = vec![n];
+        let d = diff(
+            &extract(root.clone()),
+            &extract(root),
+            &[step(None, Some("Save"))],
+        );
+        assert_eq!(d.verdict, Verdict::Ok);
+    }
+
+    /// A step anchored only by tooltip is re-resolvable, so it is not unanchored.
+    #[test]
+    fn tooltip_anchored_steps_are_not_unanchored() {
+        assert!(unanchored_steps(&[step_titled("Blur region")]).is_empty());
+    }
+
+    /// The player refuses a tooltip that matches more than one element, so
+    /// `has_anchor` must too — otherwise a tour that dies at runtime is
+    /// reported as merely drifted and the check exits 0.
+    #[test]
+    fn a_repeated_tooltip_is_not_an_anchor() {
+        let mut root = node("body", [0.0, 0.0, 200.0, 100.0]);
+        root.kids = vec![
+            titled("button", "Delete", [10.0, 10.0, 20.0, 20.0]),
+            titled("button", "Delete", [10.0, 40.0, 20.0, 20.0]),
+        ];
+        let page = extract(root);
+        assert!(!has_anchor(&page, None, None, Some("Delete")));
+
+        let mut only = node("body", [0.0, 0.0, 200.0, 100.0]);
+        only.kids = vec![titled("button", "Delete", [10.0, 10.0, 20.0, 20.0])];
+        assert!(has_anchor(&extract(only), None, None, Some("Delete")));
+    }
+
+    /// A baseline recorded before the walker captured `title` anchors icon-only
+    /// nodes by DOM path. Enabling the rung against a v2 live capture would
+    /// re-key every one of them and report an unchanged app as drifted.
+    #[test]
+    fn a_v1_baseline_does_not_light_up_against_a_v2_capture() {
+        let mut root = node("body", [0.0, 0.0, 200.0, 100.0]);
+        root.kids = vec![titled("button", "Delete", [10.0, 10.0, 20.0, 20.0])];
+
+        // Same page, but the old walker never wrote `title`.
+        let mut old_root = root.clone();
+        old_root.kids[0].title = None;
+        let mut before = extract(old_root);
+        before.v = 1;
+
+        let d = diff(&before, &extract(root), &[]);
+        assert_eq!(d.verdict, Verdict::Ok, "{:?}", d.findings);
+        assert!(d.findings.is_empty(), "{:?}", d.findings);
     }
 }

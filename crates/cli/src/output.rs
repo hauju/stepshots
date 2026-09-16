@@ -41,6 +41,11 @@ pub struct StepOutput {
     /// Annotations that could not be anchored when this step was recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotation_warnings: Option<Vec<AnnotationWarning>>,
+    /// Set when a click left the page completely unchanged — almost always a
+    /// selector that resolved to a wrapper or a disabled control rather than
+    /// the thing it was meant to hit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_effect: Option<bool>,
 }
 
 /// An annotation that failed to anchor onto a recorded step.

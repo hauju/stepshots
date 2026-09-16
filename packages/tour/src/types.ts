@@ -20,6 +20,9 @@ export interface TourFallback {
   text?: string;
   /** aria-label of the target at record time. */
   aria?: string;
+  /** `title` attribute of the target at record time — an icon-only control's
+   * only durable label. */
+  title?: string;
 }
 
 /** One step of a live tour: anchor to `selector`, show `title`/`body`, advance on interaction. */

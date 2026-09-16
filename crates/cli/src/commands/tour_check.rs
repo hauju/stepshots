@@ -56,6 +56,7 @@ struct Resolved {
     how: String,
     text: Option<String>,
     aria: Option<String>,
+    title: Option<String>,
 }
 
 pub async fn run(
@@ -215,6 +216,7 @@ async fn check_tour(
                 .as_deref()
                 .map(|a| format!("aria \"{a}\""))
                 .or_else(|| resolved.text.as_deref().map(|t| format!("text \"{t}\"")))
+                .or_else(|| resolved.title.as_deref().map(|t| format!("title \"{t}\"")))
                 .unwrap_or_else(|| "anchor".into());
             (
                 "drift",
@@ -228,6 +230,7 @@ async fn check_tour(
             let fresh = TourFallback {
                 text: resolved.text.clone(),
                 aria: resolved.aria.clone(),
+                title: resolved.title.clone(),
             };
             let fresh = (!fresh.is_empty()).then_some(fresh);
             let current = &mut file.steps[i].fallback;
@@ -276,7 +279,7 @@ fn step_check_value(step: &manifest::TourFileStep) -> Option<String> {
 fn fallbacks_equal(a: Option<&TourFallback>, b: Option<&TourFallback>) -> bool {
     match (a, b) {
         (None, None) => true,
-        (Some(a), Some(b)) => a.text == b.text && a.aria == b.aria,
+        (Some(a), Some(b)) => a.text == b.text && a.aria == b.aria && a.title == b.title,
         _ => false,
     }
 }
@@ -306,6 +309,10 @@ async fn wait_for_target(
                     .to_string(),
                 text: obj.get("text").and_then(|v| v.as_str()).map(str::to_string),
                 aria: obj.get("aria").and_then(|v| v.as_str()).map(str::to_string),
+                title: obj
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             }));
         }
         if start.elapsed().as_millis() as u64 >= WAIT_TIMEOUT_MS {
@@ -327,6 +334,7 @@ fn resolve_script(selector: &str, fallback: Option<&TourFallback>) -> Result<Str
     };
     let aria = lowered(fallback.and_then(|f| f.aria.as_ref()))?;
     let text = lowered(fallback.and_then(|f| f.text.as_ref()))?;
+    let title = lowered(fallback.and_then(|f| f.title.as_ref()))?;
     Ok(format!(
         r#"(() => {{
             const TAG = "data-stepshots-check";
@@ -360,10 +368,26 @@ fn resolve_script(selector: &str, fallback: Option<&TourFallback>) -> Result<Str
                 }}
                 if (!el && partial.length === 1) {{ el = partial[0]; how = "fallback"; }}
             }}
+            const wantTitle = {title};
+            if (!el && wantTitle) {{
+                const hits = [];
+                for (const c of document.querySelectorAll("[title]")) {{
+                    if (!visible(c)) continue;
+                    if ((c.getAttribute("title") || "").trim().toLowerCase() === wantTitle) hits.push(c);
+                }}
+                // Tooltips repeat far more often than aria-labels ("Delete" on
+                // every row), so a title match is only trusted when unique.
+                if (hits.length === 1) {{ el = hits[0]; how = "fallback"; }}
+            }}
             if (!el) return null;
             el.setAttribute(TAG, "1");
             const raw = (el.textContent || "").replace(/\s+/g, " ").trim();
-            return {{ how, text: raw ? raw.slice(0, 120) : null, aria: el.getAttribute("aria-label") || null }};
+            return {{
+                how,
+                text: raw ? raw.slice(0, 120) : null,
+                aria: el.getAttribute("aria-label") || null,
+                title: el.getAttribute("title") || null
+            }};
         }})()"#,
         sel = serde_json::to_string(selector)?,
     ))
@@ -496,10 +520,12 @@ mod tests {
         let fallback = TourFallback {
             text: Some("  New Project ".into()),
             aria: None,
+            title: Some("Create".into()),
         };
         let js = resolve_script("#go", Some(&fallback)).unwrap();
         assert!(js.contains(r#"const wantText = "new project";"#));
         assert!(js.contains("const wantAria = null;"));
+        assert!(js.contains(r#"const wantTitle = "create";"#));
         assert!(js.contains(r##"document.querySelector("#go")"##));
     }
 

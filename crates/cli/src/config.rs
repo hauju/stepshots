@@ -356,6 +356,8 @@ pub fn sample_config() -> String {
         format: Some(DemoFormat::Desktop),
         default_delay: default_delay(),
         theme: None,
+        // Default (on) — left unset so the sample config stays about choices.
+        cursor: None,
         // Sandbox capture is opt-in; `stepshots init` should not turn it on.
         capture_dom: None,
         redact_selectors: Vec::new(),

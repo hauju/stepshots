@@ -11,6 +11,7 @@ pub mod record;
 pub mod sandbox;
 pub mod schema;
 pub mod serve;
+pub mod sheet;
 pub mod tour;
 pub mod tour_check;
 pub mod upgrade;

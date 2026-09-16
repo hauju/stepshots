@@ -270,9 +270,13 @@ pub async fn record_tutorial(
         std::collections::HashMap::new();
 
     let capture_dom = config.capture_dom == Some(true);
+    // On unless explicitly disabled — see `StepshotsConfig::cursor`.
+    let cursor = config.cursor != Some(false);
 
     // Execute each config step and capture the screenshot for that step's scene.
     let mut failure: Option<StepFailure> = None;
+    // Clicks that resolved, fired, and left the page exactly as it was.
+    let mut inert_clicks: Vec<(usize, String)> = Vec::new();
     for (i, step) in tutorial.steps.iter().enumerate() {
         pb.set_message(format!(
             "{}: {}",
@@ -281,6 +285,7 @@ pub async fn record_tutorial(
         ));
 
         let drift_start = drift.len();
+        let mut no_effect = false;
 
         let step_result: Result<(), CliError> = async {
             wait_for_step_target(&browser, step).await?;
@@ -305,13 +310,14 @@ pub async fn record_tutorial(
                 "click" | "type" | "select" | "hover" => step.selector.as_deref(),
                 _ => None,
             };
-            let mut target_identity: (Option<String>, Option<String>) = (None, None);
+            let mut target_identity = crate::browser::ElementIdentity::default();
             // Serialized DOM extract for this step, captured at the same instant
             // as the screenshot so the two describe the same page state.
             let mut dom_json: Option<Vec<u8>> = None;
             if capture_before_action {
                 scene_url = get_current_url(&browser).await;
-                overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
+                overlays =
+                    resolve_overlays(&browser, step, viewport, i + 1, cursor, &mut drift).await?;
                 let png = browser.screenshot().await?;
                 screenshots.push(png);
                 dom_json =
@@ -320,6 +326,15 @@ pub async fn record_tutorial(
                     target_identity = browser.get_element_identity(sel).await.unwrap_or_default();
                 }
             }
+
+            // A click is the only action whose target can silently be wrong:
+            // it resolves, it is clicked, and nothing happens. Fingerprint the
+            // page on either side of it to catch that.
+            let before_sig = if step.action == "click" {
+                browser.page_signature().await
+            } else {
+                None
+            };
 
             // Execute the action (may capture transition frames for scroll steps)
             let action_result = execute_action(&browser, step, &config.base_url).await?;
@@ -331,9 +346,16 @@ pub async fn record_tutorial(
                 browser.wait_idle(delay).await;
             }
 
+            if let Some(before) = before_sig
+                && browser.page_signature().await == Some(before)
+            {
+                no_effect = true;
+            }
+
             if !capture_before_action {
                 scene_url = get_current_url(&browser).await;
-                overlays = resolve_overlays(&browser, step, viewport, i + 1, &mut drift).await?;
+                overlays =
+                    resolve_overlays(&browser, step, viewport, i + 1, cursor, &mut drift).await?;
                 let png = browser.screenshot().await?;
                 screenshots.push(png);
                 dom_json =
@@ -387,8 +409,9 @@ pub async fn record_tutorial(
                 target_url: step.url.clone(),
                 selector: step.selector.clone(),
                 selector_quality: step.selector_quality.clone(),
-                target_text: target_identity.0,
-                target_aria: target_identity.1,
+                target_text: target_identity.text,
+                target_aria: target_identity.aria,
+                target_title: target_identity.title,
                 highlights: step_highlight.map(|a| vec![a]),
                 blur_regions: if step_blurs.is_empty() {
                     None
@@ -439,6 +462,10 @@ pub async fn record_tutorial(
         }
         .await;
 
+        if no_effect {
+            inert_clicks.push((i + 1, step.selector.clone().unwrap_or_default()));
+        }
+
         if let Err(e) = step_result {
             pb.finish_and_clear();
             // Capture debugging context while the failed page is still open.
@@ -452,6 +479,7 @@ pub async fn record_tutorial(
                 status: "failed",
                 error: Some(e.to_string()),
                 annotation_warnings: None,
+                no_effect: None,
             });
             failure = Some(StepFailure {
                 step_index: i,
@@ -475,7 +503,7 @@ pub async fn record_tutorial(
             name: step.name.clone(),
             action: step.action.clone(),
             selector: step.selector.clone(),
-            status: if step_warnings.is_empty() {
+            status: if step_warnings.is_empty() && !no_effect {
                 "ok"
             } else {
                 "drift"
@@ -486,6 +514,7 @@ pub async fn record_tutorial(
             } else {
                 Some(step_warnings)
             },
+            no_effect: no_effect.then_some(true),
         });
 
         pb.inc(1);
@@ -496,6 +525,18 @@ pub async fn record_tutorial(
     }
 
     pb.finish_with_message("done");
+
+    if !json && !inert_clicks.is_empty() {
+        eprintln!(
+            "  \u{26a0} {} click(s) changed nothing on the page:",
+            inert_clicks.len()
+        );
+        for (n, selector) in &inert_clicks {
+            eprintln!(
+                "    - Step {n}: \"{selector}\" resolved and was clicked, but the page did not react"
+            );
+        }
+    }
 
     if !json && !drift.is_empty() {
         eprintln!(
@@ -753,14 +794,18 @@ pub(crate) async fn resolve_overlays(
     step: &StepConfig,
     viewport: &Viewport,
     step_num: usize,
+    cursor: bool,
     drift: &mut Vec<AnnotationDrift>,
 ) -> Result<ResolvedOverlays, CliError> {
-    let highlight = resolve_highlight(browser, step, viewport, step_num, drift).await?;
+    let mut highlight = resolve_highlight(browser, step, viewport, step_num, drift).await?;
     let blurs = resolve_blur_regions(browser, step, viewport, step_num, drift).await?;
     let arrows = resolve_arrows(browser, step, viewport, step_num, drift).await?;
-    let hotspots = resolve_hotspots(browser, step, viewport, step_num, drift).await?;
+    let mut hotspots = resolve_hotspots(browser, step, viewport, step_num, drift).await?;
     let popups = resolve_popups(browser, step, viewport, step_num, drift).await?;
     let zooms = resolve_zoom_regions(browser, step, viewport, step_num, drift).await?;
+    if cursor {
+        mark_click_target(browser, step, viewport, &mut highlight, &mut hotspots).await?;
+    }
     Ok(ResolvedOverlays {
         highlight,
         blurs,
@@ -769,6 +814,102 @@ pub(crate) async fn resolve_overlays(
         popups,
         zooms,
     })
+}
+
+/// Show where the click landed.
+///
+/// A screenshot demo shows the *result* of an action with nothing to say what
+/// the action was — the one thing a screen recording conveys for free. When the
+/// step already highlights its own click target, flagging that highlight is
+/// enough and nothing is added; this is also what the Chrome extension recorder
+/// does, so both recorders now produce the same shape. Only when there is no
+/// such highlight does a cursor indicator get placed at the click point.
+///
+/// Silent by design: a click target that no longer resolves is already reported
+/// by the step's own action, and `drift` is for annotations the *author* wrote.
+async fn mark_click_target(
+    browser: &Browser,
+    step: &StepConfig,
+    viewport: &Viewport,
+    highlight: &mut Option<HighlightEntry>,
+    hotspots: &mut Vec<HotspotIndicator>,
+) -> Result<(), CliError> {
+    match cursor_placement(step, highlight.is_some(), highlight_has_own_bounds(step)) {
+        CursorPlacement::None => {}
+        CursorPlacement::FlagHighlight => {
+            if let Some(h) = highlight {
+                h.is_click_target = Some(true);
+            }
+        }
+        CursorPlacement::Indicator => {
+            let selector = step.selector.as_deref().unwrap_or_default();
+            let center = browser.get_element_center(selector).await?;
+            if classify_point(center.as_ref(), viewport).is_none()
+                && let Some(center) = center
+            {
+                hotspots.push(HotspotIndicator {
+                    x: center.x,
+                    y: center.y,
+                    color: None,
+                    size: None,
+                    callout: None,
+                    position: None,
+                    is_click_target: Some(true),
+                    z_index: None,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Where the click marker goes for one step. Separated from the browser call so
+/// the branch that decides "is the existing highlight already the marker?" is
+/// testable — getting it wrong either double-marks a step or silently drops the
+/// marker, and neither shows up as a failure anywhere else.
+#[derive(Debug, PartialEq, Eq)]
+enum CursorPlacement {
+    /// Not a click, or no target to mark.
+    None,
+    /// The step's own highlight frames the click target; label it as such.
+    FlagHighlight,
+    /// Nothing points at the click yet; place an indicator at the click point.
+    Indicator,
+}
+
+/// Whether the step's highlight was positioned by literal pixel bounds.
+///
+/// `resolve_highlight` lets `bounds` win over selector resolution, so such a
+/// highlight frames whatever rectangle the author typed and has no relationship
+/// to the click target at all.
+fn highlight_has_own_bounds(step: &StepConfig) -> bool {
+    step.highlights.first().is_some_and(|h| h.bounds.is_some())
+}
+
+fn cursor_placement(
+    step: &StepConfig,
+    has_highlight: bool,
+    highlight_has_own_bounds: bool,
+) -> CursorPlacement {
+    if step.action != "click" {
+        return CursorPlacement::None;
+    }
+    let Some(selector) = step.selector.as_deref() else {
+        return CursorPlacement::None;
+    };
+    // A highlight aimed elsewhere — by `highlightSelector`, or by literal
+    // `bounds` — frames context, not the click, so it must not be relabelled as
+    // the target. The click still needs its own marker.
+    let highlight_frames_click = !highlight_has_own_bounds
+        && step
+            .highlight_selector
+            .as_deref()
+            .is_none_or(|h| h == selector);
+    if has_highlight && highlight_frames_click {
+        CursorPlacement::FlagHighlight
+    } else {
+        CursorPlacement::Indicator
+    }
 }
 
 /// Resolve highlight config into a HighlightEntry with element bounds.
@@ -1070,6 +1211,70 @@ mod tests {
             height: h,
             z_index: None,
         }
+    }
+
+    fn click_step(selector: &str, highlight_selector: Option<&str>) -> StepConfig {
+        serde_json::from_value(serde_json::json!({
+            "action": "click",
+            "selector": selector,
+            "highlightSelector": highlight_selector,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_click_with_no_highlight_gets_its_own_marker() {
+        assert_eq!(
+            cursor_placement(&click_step("#save", None), false, false),
+            CursorPlacement::Indicator
+        );
+    }
+
+    /// The step already frames its click target — a second marker on top of it
+    /// is noise, and this is the shape the extension recorder emits too.
+    #[test]
+    fn a_highlight_on_the_click_target_becomes_the_marker() {
+        assert_eq!(
+            cursor_placement(&click_step("#save", None), true, false),
+            CursorPlacement::FlagHighlight
+        );
+    }
+
+    /// `highlightSelector` points the highlight at context elsewhere on the
+    /// page. Relabelling it would claim the viewer clicked the wrong element.
+    #[test]
+    fn a_highlight_aimed_elsewhere_does_not_absorb_the_marker() {
+        assert_eq!(
+            cursor_placement(&click_step("#save", Some("#sidebar")), true, false),
+            CursorPlacement::Indicator
+        );
+    }
+
+    /// A highlight placed by literal `bounds` frames an arbitrary rectangle —
+    /// calling it the click target would tell the viewer they clicked it.
+    #[test]
+    fn a_highlight_with_explicit_bounds_does_not_absorb_the_marker() {
+        let step: StepConfig = serde_json::from_value(serde_json::json!({
+            "action": "click",
+            "selector": "#submit",
+            "highlights": [{ "bounds": { "x": 0, "y": 0, "width": 320, "height": 64 } }],
+        }))
+        .unwrap();
+        assert!(highlight_has_own_bounds(&step));
+        assert_eq!(
+            cursor_placement(&step, true, true),
+            CursorPlacement::Indicator
+        );
+    }
+
+    #[test]
+    fn non_click_steps_get_no_marker() {
+        let step: StepConfig = serde_json::from_value(serde_json::json!({
+            "action": "navigate",
+            "url": "/home",
+        }))
+        .unwrap();
+        assert_eq!(cursor_placement(&step, true, false), CursorPlacement::None);
     }
 
     #[test]

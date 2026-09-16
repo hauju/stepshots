@@ -36,6 +36,16 @@ pub struct SessionSource<'a> {
     pub storage_state: Option<&'a crate::storage_state::StorageState>,
 }
 
+/// A target element's record-time identity, used to re-resolve it after the
+/// selector stops matching. Ordered most durable first — the same ladder the
+/// tour player, `tour check` and drift detection all walk.
+#[derive(Default, Clone, Debug)]
+pub struct ElementIdentity {
+    pub text: Option<String>,
+    pub aria: Option<String>,
+    pub title: Option<String>,
+}
+
 /// The session flags exactly as they arrive from the command line, before any
 /// file has been read. [`SessionArgs::load`] turns this into a
 /// [`SessionSource`].
@@ -417,6 +427,66 @@ impl Browser {
         Ok(bytes)
     }
 
+    /// A cheap fingerprint of what the page currently shows.
+    ///
+    /// Compared before and after an action to answer one question: did anything
+    /// happen? Built from geometry, text and toggle state rather than pixels,
+    /// so antialiasing and caret blink don't register while a real change
+    /// always does. The value is compared and discarded — never serialized.
+    pub async fn page_signature(&self) -> Option<u32> {
+        const JS: &str = r#"
+        (() => {
+            let h = 2166136261;
+            const add = (s) => {
+                for (let i = 0; i < s.length; i++) {
+                    h ^= s.charCodeAt(i);
+                    h = Math.imul(h, 16777619);
+                }
+            };
+            add(location.href);
+            for (const el of document.querySelectorAll("body *")) {
+                const r = el.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) continue;
+                add(el.tagName);
+                add([r.x, r.y, r.width, r.height].map(Math.round).join(","));
+                if (typeof el.className === "string") add(el.className);
+                // State a control changes without moving anything. `innerText`
+                // covers none of this: a button that fills a form, picks an
+                // option or ticks a box would otherwise read as a dead click.
+                if (el.checked === true) add("checked");
+                if (el.type !== "password" && typeof el.value === "string") add(el.value);
+                for (const a of ["aria-expanded", "aria-selected", "aria-checked", "aria-pressed"]) {
+                    const v = el.getAttribute(a);
+                    if (v) add(a + v);
+                }
+            }
+            add(document.body.innerText || "");
+            return h >>> 0;
+        })()
+        "#;
+        let result = self.page().evaluate(JS).await.ok()?;
+        result.into_value::<u32>().ok()
+    }
+
+    /// Capture the whole scrollable page as PNG bytes.
+    ///
+    /// PNG, not WebP: the output is a contact sheet of already-lossy step
+    /// images, and re-encoding text labels lossily on top of them is what makes
+    /// a summary sheet unreadable.
+    pub async fn screenshot_full_png(&self) -> Result<Vec<u8>, CliError> {
+        let bytes = self
+            .page()
+            .screenshot(
+                chromiumoxide::page::ScreenshotParams::builder()
+                    .format(CaptureScreenshotFormat::Png)
+                    .full_page(true)
+                    .build(),
+            )
+            .await
+            .map_err(|e| CliError::Browser(format!("Full-page screenshot failed: {e}")))?;
+        Ok(bytes)
+    }
+
     /// Get the bounding rectangle of an element by CSS selector.
     pub async fn get_bounds(&self, selector: &str) -> Result<Option<ElementBounds>, CliError> {
         let js = format!(
@@ -496,10 +566,7 @@ impl Browser {
     /// Capture the target element's text + aria-label, for use as a resilient
     /// fallback anchor when the CSS selector later drifts. Returns `(text, aria)`;
     /// both `None` if the element isn't found.
-    pub async fn get_element_identity(
-        &self,
-        selector: &str,
-    ) -> Result<(Option<String>, Option<String>), CliError> {
+    pub async fn get_element_identity(&self, selector: &str) -> Result<ElementIdentity, CliError> {
         let js = format!(
             r#"
             (() => {{
@@ -508,7 +575,8 @@ impl Browser {
                 const raw = (el.textContent || "").replace(/\s+/g, " ").trim();
                 const text = raw ? raw.slice(0, 120) : null;
                 const aria = el.getAttribute("aria-label") || null;
-                return {{ text, aria }};
+                const title = el.getAttribute("title") || null;
+                return {{ text, aria, title }};
             }})()
             "#,
             selector = serde_json::to_string(selector)?
@@ -521,11 +589,14 @@ impl Browser {
         let value = result.into_value::<serde_json::Value>().ok();
         match value {
             Some(serde_json::Value::Object(obj)) => {
-                let text = obj.get("text").and_then(|v| v.as_str()).map(str::to_string);
-                let aria = obj.get("aria").and_then(|v| v.as_str()).map(str::to_string);
-                Ok((text, aria))
+                let field = |k: &str| obj.get(k).and_then(|v| v.as_str()).map(str::to_string);
+                Ok(ElementIdentity {
+                    text: field("text"),
+                    aria: field("aria"),
+                    title: field("title"),
+                })
             }
-            _ => Ok((None, None)),
+            _ => Ok(ElementIdentity::default()),
         }
     }
 

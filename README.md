@@ -52,6 +52,22 @@ stepshots preview my-tutorial
 
 If a step fails (usually a selector that no longer matches), the CLI saves a screenshot of the page at failure time (`output/<key>.failed-step-<n>.png`), prints the page URL, and continues with the remaining tutorials. Use `stepshots inspect <url>` to find the right selector and `stepshots preview <key>` to watch the flow live.
 
+A click that resolves but leaves the page unchanged is reported as a warning — that is almost always a selector pointing at a wrapper or a disabled control rather than the thing you meant to hit.
+
+Each click is marked in the demo so a viewer can see the action and not just its result: the step's own highlight is labelled as the click target when it has one, otherwise a cursor indicator is placed where the click landed. Turn it off with `record --no-cursor` or `"cursor": false` in the config.
+
+### Review a recording at a glance
+
+```sh
+# One image with every step laid out and labelled
+stepshots sheet output/my-tutorial.stepshot
+
+# Explicit output path
+stepshots sheet output/my-tutorial.stepshot -o docs/my-tutorial.png
+```
+
+Useful in a pull request or a bug report, where unzipping the bundle or uploading it first is more work than the question deserves.
+
 ### Verify demos are still up to date
 
 ```sh

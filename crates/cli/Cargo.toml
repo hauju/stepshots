@@ -8,13 +8,16 @@ repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
 description = "CLI for recording, bundling, and uploading Stepshots demos"
+readme = "README.md"
+keywords = ["screenshot", "demo", "onboarding", "headless-chrome", "documentation"]
+categories = ["command-line-utilities", "development-tools", "web-programming", "multimedia::images"]
 
 [[bin]]
 name = "stepshots"
 path = "src/main.rs"
 
 [dependencies]
-manifest = { path = "../manifest", version = "1.6.0", package = "stepshots-manifest", features = ["schema"] }
+manifest = { path = "../manifest", version = "1.7.0", package = "stepshots-manifest", features = ["schema"] }
 schemars = "1"
 
 # CLI

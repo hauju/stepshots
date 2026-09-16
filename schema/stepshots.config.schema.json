@@ -29,6 +29,13 @@
         "null"
       ]
     },
+    "cursor": {
+      "description": "Mark where each click landed, so a viewer can see the action and not\njust its result. On by default: a screenshot demo has no motion to carry\nthat information, which is the one thing a screen recording gets for\nfree. A step's own highlight is marked as the click target when it has\none; otherwise a cursor indicator is placed at the click point.\nEquivalent to `record --no-cursor` when set to false.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "defaultDelay": {
       "description": "Milliseconds to wait after each action before capturing, unless a step sets its own `delay`.",
       "type": "integer",

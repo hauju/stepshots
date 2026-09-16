@@ -22,6 +22,7 @@ const fixture = `<!doctype html><html><body>
   <button id="btn1">Create project</button>
   <input id="field1" />
   <select id="plan1"><option value="">--</option><option value="pro">Pro</option></select>
+  <button id="icon1" title="Blur region"><svg></svg></button>
 </body></html>`;
 
 /**
@@ -223,6 +224,62 @@ await scenario('"lost the trail" recovery when a target never appears', async ()
   check(shadow.querySelector("h4").textContent === "Hmm, we lost the trail", "recovery card shows the lost-the-trail heading");
   check(shadow.querySelector(".card").classList.contains("show"), "recovery card is visible");
   check(!shadow.querySelector(".spot").classList.contains("show"), "no spotlight shown in the recovery state");
+});
+
+// ---------------------------------------------------------------------------
+
+// An icon-only toolbar button has no text and often no aria-label. `title` is
+// the only identity it carries, so it is the only thing that can re-anchor the
+// step after the selector drifts. Kept in lockstep with `anchor_of` in
+// crates/cli/src/drift.rs and `resolve_script` in commands/tour_check.rs.
+await scenario("title fallback re-anchors an icon-only target", async () => {
+  const window = loadPage();
+  const events = [];
+  window.StepshotsTour.startTour(
+    {
+      steps: [
+        {
+          selector: "#icon1-renamed-by-a-refactor",
+          title: "Blur it",
+          body: "…",
+          advance: { type: "click" },
+          fallback: { title: "Blur region" },
+        },
+      ],
+    },
+    { waitTimeoutMs: 50, onEvent: (e) => events.push(eventTag(e)) },
+  );
+
+  window.document.getElementById("icon1").click();
+  check(events.join(",") === "start,step:0,done", "title fallback resolved the target and the click advanced");
+  await delay(90);
+  check(!events.includes("lost:0"), "no lost-the-trail recovery fired");
+});
+
+await scenario("an ambiguous title match is refused rather than guessed", async () => {
+  const window = loadPage();
+  const twin = window.document.createElement("button");
+  twin.setAttribute("title", "Blur region");
+  window.document.body.appendChild(twin);
+
+  const events = [];
+  window.StepshotsTour.startTour(
+    {
+      steps: [
+        {
+          selector: "#gone",
+          title: "Blur it",
+          body: "…",
+          advance: { type: "click" },
+          fallback: { title: "Blur region" },
+        },
+      ],
+    },
+    { waitTimeoutMs: 50, onEvent: (e) => events.push(eventTag(e)) },
+  );
+
+  await delay(90);
+  check(events.includes("lost:0"), "two elements share the tooltip, so the player refuses to pick one");
 });
 
 // ---------------------------------------------------------------------------

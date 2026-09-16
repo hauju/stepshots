@@ -124,6 +124,10 @@ enum Commands {
         #[arg(long)]
         dom: bool,
 
+        /// Don't mark where each click landed. Overrides `cursor` in the config.
+        #[arg(long)]
+        no_cursor: bool,
+
         /// Persistent browser profile directory (for authenticated recordings)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
@@ -137,6 +141,17 @@ enum Commands {
     },
     /// List the tutorials defined in the config
     List,
+    /// Render every step of a bundle onto one image — a contact sheet for
+    /// reviewing a recording without unzipping or uploading it
+    Sheet {
+        /// The .stepshot bundle to summarise
+        bundle: PathBuf,
+
+        /// Output file (default: <bundle>.sheet.png next to the bundle)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+
     /// Preview a tutorial in a visible browser
     Preview {
         /// Tutorial key to preview
@@ -678,6 +693,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             output,
             dry_run,
             dom,
+            no_cursor,
             profile_dir,
             storage_state,
         } => {
@@ -688,6 +704,11 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             // The flag turns capture on; it never turns a config opt-in off.
             if dom {
                 config.capture_dom = Some(true);
+            }
+            // Mirrors `--dom`: the flag only ever moves the setting off its
+            // default, never overrides an explicit config opt-in the other way.
+            if no_cursor {
+                config.cursor = Some(false);
             }
             if !json {
                 println!("Using config: {}", config_path.display());
@@ -712,6 +733,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             let config_path = config::find_config(cli.config.as_deref())?;
             let config = config::load_config(&config_path)?;
             commands::list::run(&config, &config_path, json)?;
+        }
+        Commands::Sheet { bundle, output } => {
+            commands::sheet::run(&bundle, output).await?;
         }
         Commands::Preview {
             tutorial,

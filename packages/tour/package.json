@@ -1,6 +1,6 @@
 {
   "name": "@stepshots/tour",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Framework-agnostic live guided-tour player for Stepshots recordings \u2014 spotlight the next element on your real app and light the way",
   "type": "module",
   "main": "dist/index.cjs",

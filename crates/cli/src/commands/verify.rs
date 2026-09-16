@@ -296,7 +296,7 @@ async fn check_step(
 
     let capture_before_action = should_capture_before_action(step);
     if capture_before_action {
-        resolve_overlays(browser, step, viewport, index + 1, drift)
+        resolve_overlays(browser, step, viewport, index + 1, false, drift)
             .await
             .map_err(|e| ("action_failed", e))?;
     }
@@ -316,7 +316,7 @@ async fn check_step(
         browser.wait_idle(delay).await;
     }
     if !capture_before_action {
-        resolve_overlays(browser, step, viewport, index + 1, drift)
+        resolve_overlays(browser, step, viewport, index + 1, false, drift)
             .await
             .map_err(|e| ("action_failed", e))?;
     }

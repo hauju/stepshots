@@ -126,6 +126,13 @@
             "string",
             "null"
           ]
+        },
+        "title": {
+          "description": "`title` attribute — the only durable identity an icon-only control has.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

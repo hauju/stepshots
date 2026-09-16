@@ -375,7 +375,12 @@ async fn check_tour(
             }
             let fb = step.fallback.as_ref();
             let has_fallback = fb.is_some_and(|f| {
-                crate::drift::has_anchor(&page, f.aria.as_deref(), f.text.as_deref())
+                crate::drift::has_anchor(
+                    &page,
+                    f.aria.as_deref(),
+                    f.text.as_deref(),
+                    f.title.as_deref(),
+                )
             });
 
             if has_fallback {
@@ -383,8 +388,9 @@ async fn check_tour(
                     severity: Severity::Content,
                     kind: "drift",
                     what: step.selector.clone(),
-                    detail: "selector missed; the player would fall back to its text/aria anchor"
-                        .into(),
+                    detail:
+                        "selector missed; the player would fall back to its text/aria/title anchor"
+                            .into(),
                     step: Some(n),
                     nodes: 1,
                 });

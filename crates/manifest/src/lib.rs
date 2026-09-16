@@ -85,6 +85,14 @@ pub struct StepshotsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(schema_with = "theme_schema"))]
     pub theme: Option<String>,
+    /// Mark where each click landed, so a viewer can see the action and not
+    /// just its result. On by default: a screenshot demo has no motion to carry
+    /// that information, which is the one thing a screen recording gets for
+    /// free. A step's own highlight is marked as the click target when it has
+    /// one; otherwise a cursor indicator is placed at the click point.
+    /// Equivalent to `record --no-cursor` when set to false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<bool>,
     /// Capture a DOM structural extract alongside each screenshot, as input to
     /// the sandbox generator. Off by default. Equivalent to `record --dom`.
     ///
@@ -754,12 +762,15 @@ pub struct TourFallback {
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aria: Option<String>,
+    /// `title` attribute — the only durable identity an icon-only control has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 impl TourFallback {
     /// A fallback carrying no anchor at all — nothing worth serializing.
     pub fn is_empty(&self) -> bool {
-        self.text.is_none() && self.aria.is_none()
+        self.text.is_none() && self.aria.is_none() && self.title.is_none()
     }
 }
 
@@ -819,6 +830,7 @@ impl BundleManifest {
                     let fallback = TourFallback {
                         text: s.target_text.clone(),
                         aria: s.target_aria.clone(),
+                        title: s.target_title.clone(),
                     };
                     (!fallback.is_empty()).then_some(fallback)
                 };
@@ -1008,6 +1020,14 @@ pub struct BundleManifestStep {
     #[serde(alias = "targetAria")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_aria: Option<String>,
+    /// `title` attribute of the target element at record time (fallback anchor).
+    ///
+    /// Icon-only controls — a toolbar button wrapping an SVG — commonly have
+    /// neither text nor `aria-label`, leaving `selector` as their only identity.
+    /// A tooltip is the one label such a control almost always carries.
+    #[serde(alias = "targetTitle")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_title: Option<String>,
     #[serde(alias = "annotations")]
     #[serde(default)]
     pub highlights: Option<Vec<HighlightEntry>>,

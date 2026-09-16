@@ -294,6 +294,7 @@ fn new_manual_step(url: Option<String>, base_url: Option<&str>) -> BundleManifes
         selector_quality: None,
         target_text: None,
         target_aria: None,
+        target_title: None,
         highlights: None,
         blur_regions: None,
         arrows: None,

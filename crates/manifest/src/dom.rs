@@ -24,7 +24,12 @@ use serde::{Deserialize, Serialize};
 use crate::Viewport;
 
 /// Current extract format version, written as `v`.
-pub const DOM_EXTRACT_VERSION: u32 = 1;
+///
+/// 2 added [`DomNode::title`]. Readers must treat the field as absent — not
+/// empty — in a v1 extract: a v1 baseline anchors icon-only nodes by DOM path,
+/// and comparing it against a v2 capture that anchors them by tooltip would
+/// report an app that never changed as having drifted.
+pub const DOM_EXTRACT_VERSION: u32 = 2;
 
 /// A single step's structural extract, stored as `dom/{i}.json` in the bundle.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +168,14 @@ pub struct DomNode {
     /// `aria-label`, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aria: Option<String>,
+    /// `title` attribute, when present.
+    ///
+    /// The last authored identity an icon-only control usually has: a toolbar
+    /// button with an SVG child has no own-text and often no `aria-label`, but
+    /// almost always a tooltip. Without this such a node anchors on its DOM
+    /// path, which no re-resolution ladder can follow across a refactor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Non-markup classification. Absent for ordinary elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<DomNodeKind>,
@@ -232,6 +245,7 @@ mod tests {
             txt: txt.map(str::to_string),
             role: None,
             aria: None,
+            title: None,
             kind: None,
             asset: None,
             palette: Vec::new(),
