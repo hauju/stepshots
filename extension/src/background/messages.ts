@@ -81,6 +81,10 @@ export interface SaveSettingsMessage {
 export interface UploadToStepshotsMessage {
   type: "UPLOAD_TO_STEPSHOTS";
   viewport: Viewport;
+  /** Publish immediately; omitted = the account's default visibility. */
+  makePublic?: boolean;
+  /** Replace this existing demo in place instead of creating a new one. */
+  replaceDemoId?: string;
 }
 
 // Content Script -> Background

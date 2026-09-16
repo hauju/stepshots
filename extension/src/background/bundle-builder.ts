@@ -1,4 +1,5 @@
 import { zipSync } from "fflate";
+import { generateStepSummary } from "../utils/step-summary";
 import type { ElementBounds, Highlight, RecordedStep, RecordingState, Viewport } from "../types";
 
 /** Convert a data URL (image/webp or image/png) to a Uint8Array. */
@@ -46,7 +47,9 @@ export function buildBundle(
 
     const manifestStep: ManifestStep = {
       file: fileName,
-      ...(step.meta?.captureOnly ? { name: "Capture screen" } : {}),
+      // Step name feeds the hosted guided-tour projection's step titles —
+      // without it, tours built from extension bundles get blank steps.
+      name: generateStepSummary(step),
       action: step.action,
       url: step.url,
       current_path: step.currentPath,
@@ -96,8 +99,10 @@ interface ManifestHighlight {
   position?: string;
   arrow?: boolean;
   color?: string;
-  borderWidth?: number;
-  isClickTarget?: boolean;
+  // Wire names are snake_case: the manifest crate's HighlightEntry has no
+  // serde rename, so camelCase keys are silently dropped on upload.
+  border_width?: number;
+  is_click_target?: boolean;
 }
 
 interface ManifestStep {
@@ -156,7 +161,7 @@ function buildManifestHighlight(
     position: highlight?.position ?? "bottom",
     arrow: highlight?.arrow ?? false,
     color: highlight?.color ?? "#3b82f6",
-    borderWidth: highlight?.showBorder === false ? 0 : 2,
-    isClickTarget: true,
+    border_width: highlight?.showBorder === false ? 0 : 2,
+    is_click_target: true,
   };
 }

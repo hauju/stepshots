@@ -442,7 +442,10 @@ async function handleMessage(
         return { error: "No screenshots captured. Please start a new recording." };
       }
 
-      return await directUpload(state, stepshotsUrl, settings.apiKey);
+      return await directUpload(state, stepshotsUrl, settings.apiKey, {
+        makePublic: message.makePublic,
+        replaceDemoId: message.replaceDemoId,
+      });
     }
 
     default:
@@ -455,21 +458,35 @@ async function directUpload(
   recordingState: RecordingState,
   stepshotsUrl: string,
   apiKey: string,
+  options: { makePublic?: boolean; replaceDemoId?: string } = {},
 ): Promise<unknown> {
   try {
     broadcastUploadProgress("bundle", "Packaging your recording into a .stepshot bundle…");
     const screenshots = await loadAllScreenshots();
     const bundleBytes = buildBundle(recordingState, screenshots, recordingState.viewport);
 
+    const replacing = !!options.replaceDemoId;
     const formData = new FormData();
-    formData.append("title", recordingState.tutorialTitle || "Untitled");
-    if (recordingState.tutorialDescription) {
-      formData.append("description", recordingState.tutorialDescription);
+    if (!replacing) {
+      formData.append("title", recordingState.tutorialTitle || "Untitled");
+      if (recordingState.tutorialDescription) {
+        formData.append("description", recordingState.tutorialDescription);
+      }
+      // Omitted entirely when unchecked so the server falls back to the
+      // account's default-visibility preference.
+      if (options.makePublic) {
+        formData.append("public", "true");
+      }
     }
     formData.append("bundle", new Blob([bundleBytes], { type: "application/zip" }), "bundle.stepshot");
 
-    broadcastUploadProgress("upload", "Uploading your demo to Stepshots…");
-    const uploadUrl = `${stepshotsUrl}/api/demos/upload-bundle`;
+    broadcastUploadProgress(
+      "upload",
+      replacing ? "Replacing your demo on Stepshots…" : "Uploading your demo to Stepshots…",
+    );
+    const uploadUrl = replacing
+      ? `${stepshotsUrl}/api/demos/${options.replaceDemoId}/replace-bundle`
+      : `${stepshotsUrl}/api/demos/upload-bundle`;
 
     // Without a granted host permission for this origin, fetches from the
     // service worker are subject to CORS — and our dashboard returns no CORS
@@ -488,7 +505,7 @@ async function directUpload(
     let res: Response;
     try {
       res = await fetch(uploadUrl, {
-        method: "POST",
+        method: replacing ? "PUT" : "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: formData,
       });
@@ -504,14 +521,29 @@ async function directUpload(
       if (res.status === 401) {
         return { error: "Invalid API key. Check your key in Settings." };
       }
+      if (replacing && res.status === 404) {
+        return {
+          error: "Demo to replace was not found — it may have been deleted. Uncheck replace to upload as a new demo.",
+        };
+      }
       return { error: text || `Upload failed (${res.status})` };
     }
 
     const data = await res.json();
-    broadcastUploadProgress("finalize", "Upload complete. Opening your demo in the editor…");
+    // Remember the upload so the next recording can replace it in place.
+    await chrome.storage.local.set({
+      lastUpload: { demoId: data.id, title: data.title || recordingState.tutorialTitle || "Untitled" },
+    });
+    broadcastUploadProgress(
+      "finalize",
+      replacing
+        ? "Demo replaced. Opening it in the editor…"
+        : "Upload complete. Opening your demo in the editor…",
+    );
     return {
       ok: true,
       demoId: data.id,
+      replaced: replacing,
       editorUrl: `${stepshotsUrl}/dashboard/demos/${data.id}/edit`,
     };
   } catch (err) {

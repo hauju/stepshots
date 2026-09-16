@@ -515,6 +515,29 @@ input:focus {
   color: #555;
 }
 
+.upload-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.upload-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.upload-option input[type="checkbox"] {
+  margin: 0;
+}
+
+.upload-option span {
+  font-size: 12px;
+  color: #555;
+}
+
 .detail-divider {
   border: none;
   border-top: 1px solid #eee;

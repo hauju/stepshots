@@ -82,6 +82,17 @@ export function Export() {
   const [uploading, setUploading] = useState(false);
   const [copyLabel, setCopyLabel] = useState("Copy config");
   const [tourNote, setTourNote] = useState("");
+  const [makePublic, setMakePublic] = useState(false);
+  const [replaceLast, setReplaceLast] = useState(false);
+  const [lastUpload, setLastUpload] = useState<{ demoId: string; title: string } | null>(null);
+
+  // Previous upload (if any) enables replace-in-place instead of a new demo.
+  useEffect(() => {
+    chrome.storage.local.get("lastUpload").then((data) => {
+      const last = data.lastUpload as { demoId?: string; title?: string } | undefined;
+      if (last?.demoId) setLastUpload({ demoId: last.demoId, title: last.title || "Untitled" });
+    });
+  }, []);
 
   // Reset upload feedback when steps or viewport change (new state arrives).
   useEffect(() => {
@@ -190,13 +201,18 @@ export function Export() {
       const result = await sendMessage({
         type: "UPLOAD_TO_STEPSHOTS",
         viewport: viewportPayload(),
+        makePublic: makePublic || undefined,
+        replaceDemoId: replaceLast && lastUpload ? lastUpload.demoId : undefined,
       });
       if (result?.ok && result.editorUrl) {
         uploadStatus.value = {
-          message: "Upload complete. Opening your demo in the editor…",
+          message: result.replaced
+            ? "Demo replaced. Opening it in the editor…"
+            : "Upload complete. Opening your demo in the editor…",
           tone: "success",
         };
         uploadResult.value = { editorUrl: result.editorUrl };
+        setLastUpload({ demoId: result.demoId, title: title.trim() || "Untitled" });
       } else {
         uploadStatus.value = { message: result?.error || "Upload failed.", tone: "error" };
       }
@@ -261,6 +277,29 @@ export function Export() {
               </div>
             );
           })
+        )}
+      </div>
+      <div class="upload-options">
+        <label class="upload-option">
+          <input
+            type="checkbox"
+            checked={makePublic}
+            disabled={replaceLast}
+            onChange={(e) => setMakePublic((e.target as HTMLInputElement).checked)}
+          />
+          <span>Make public immediately</span>
+        </label>
+        {lastUpload && (
+          <label class="upload-option">
+            <input
+              type="checkbox"
+              checked={replaceLast}
+              onChange={(e) => setReplaceLast((e.target as HTMLInputElement).checked)}
+            />
+            <span title={lastUpload.demoId}>
+              Replace previous upload &ldquo;{lastUpload.title}&rdquo;
+            </span>
+          </label>
         )}
       </div>
       {tourMode && tourEligibility ? (
