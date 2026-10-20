@@ -163,11 +163,21 @@ async fn push_verdict(
 ) -> Result<(), CliError> {
     let (mut critical, mut content, mut layout) = (0usize, 0usize, 0usize);
     let mut breaking = Vec::new();
+    // Every step-tied finding, so the dashboard editor can mark the step.
+    let mut steps = Vec::new();
     for route in &asset.routes {
         critical += route.summary.critical;
         content += route.summary.content;
         layout += route.summary.layout;
         for f in &route.findings {
+            if let Some(step) = f.step {
+                steps.push(serde_json::json!({
+                    "step": step,
+                    "severity": f.severity,
+                    "what": f.what,
+                    "detail": f.detail,
+                }));
+            }
             if f.severity == Severity::Critical {
                 breaking.push(match f.step {
                     Some(n) => format!("step {n}: {} — {}", f.what, f.detail),
@@ -183,6 +193,7 @@ async fn push_verdict(
         "content": content,
         "layout": layout,
         "breaking": breaking,
+        "steps": steps,
     });
 
     let url = format!("{}/api/demos/{demo_id}/drift", server.trim_end_matches('/'));
