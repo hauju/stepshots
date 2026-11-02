@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use indicatif::{ProgressBar, ProgressStyle};
 use manifest::{
     ArrowPointer, BundleManifest, BundleManifestStep, ElementBounds, HighlightEntry,
-    HotspotIndicator, Point2D, PopupIndicator, StepConfig, Viewport, ZoomRegion, resolve_viewport,
+    HotspotIndicator, Point2D, PopupIndicator, SourceInfo, StepConfig, Viewport, ZoomRegion,
+    resolve_viewport,
 };
 
 use crate::actions::execute_action;
@@ -31,6 +32,7 @@ pub struct StepFailure {
 /// Record one or more tutorials into `.stepshot` bundles.
 pub async fn run(
     config: &StepshotsConfig,
+    config_path: &Path,
     tutorials: &[String],
     output_dir: &Path,
     dry_run: bool,
@@ -78,6 +80,7 @@ pub async fn run(
             &output_path,
             json,
             session.with_state(storage_state.as_ref()),
+            config_path.parent(),
         )
         .await
         {
@@ -228,6 +231,7 @@ pub async fn record_tutorial(
     output_path: &Path,
     json: bool,
     session: crate::browser::SessionSource<'_>,
+    config_dir: Option<&Path>,
 ) -> Result<(Vec<StepOutput>, Option<StepFailure>), CliError> {
     // Seeds cookies before the first navigation — cookies set after a page
     // loads arrive too late to authenticate it.
@@ -562,6 +566,7 @@ pub async fn record_tutorial(
         base_url: Some(config.base_url.clone()),
         start_path: Some(tutorial.url.clone()),
         format: config.format.clone(),
+        source: config_dir.and_then(git_source),
         steps: manifest_steps,
     };
 
@@ -574,6 +579,38 @@ pub async fn record_tutorial(
     )?;
 
     Ok((step_results, None))
+}
+
+/// The git commit (and branch) checked out in `dir`, stamped with the current
+/// time. `None` outside a git repository or when `git` isn't installed — a
+/// recording never fails over provenance.
+pub(crate) fn git_source(dir: &Path) -> Option<SourceInfo> {
+    let commit = git_output(dir, &["rev-parse", "HEAD"])?;
+    // A detached HEAD (the usual CI checkout) reports "HEAD" — no branch.
+    let branch = git_output(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD");
+    Some(SourceInfo {
+        commit,
+        branch,
+        recorded_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    })
+}
+
+fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+    // `parent()` of a bare file name is "", which `git -C` rejects.
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (out.status.success() && !text.is_empty()).then_some(text)
 }
 
 /// Capture and serialize this step's DOM extract, or `None` when disabled or

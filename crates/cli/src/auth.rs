@@ -107,6 +107,51 @@ pub fn stored_token_for(server: &str) -> Option<String> {
         .map(|t| t.access_token)
 }
 
+/// Append `org=<slug>` (URL-encoded) to an API URL when a team is selected.
+/// Without one the server picks the personal workspace (or, for endpoints
+/// addressed by a demo id, the demo's own organization).
+pub fn with_org(url: String, org: Option<&str>) -> String {
+    let Some(org) = org else { return url };
+    match reqwest::Url::parse(&url) {
+        Ok(mut u) => {
+            u.query_pairs_mut().append_pair("org", org);
+            u.into()
+        }
+        Err(_) => url,
+    }
+}
+
+/// One organization the account belongs to, as listed by `/api/whoami`.
+#[derive(Debug, Deserialize)]
+struct WhoamiOrg {
+    name: String,
+    slug: String,
+    #[serde(default)]
+    personal: bool,
+    #[serde(default)]
+    role: String,
+}
+
+/// The `orgs` list of a whoami response. Older servers don't send it.
+#[derive(Debug, Deserialize)]
+struct WhoamiOrgs {
+    #[serde(default)]
+    orgs: Vec<WhoamiOrg>,
+}
+
+/// One `whoami` output line per organization.
+fn org_lines(info: &serde_json::Value) -> Vec<String> {
+    let orgs = serde_json::from_value::<WhoamiOrgs>(info.clone())
+        .map(|o| o.orgs)
+        .unwrap_or_default();
+    orgs.iter()
+        .map(|o| {
+            let personal = if o.personal { ", personal" } else { "" };
+            format!("    {}  {} ({}{personal})", o.slug, o.name, o.role)
+        })
+        .collect()
+}
+
 /// Show which account the stored (or provided) token authenticates as by
 /// validating it against `server`'s `/api/whoami` endpoint.
 pub async fn whoami(server: &str, token_override: Option<String>) -> Result<(), CliError> {
@@ -164,6 +209,13 @@ pub async fn whoami(server: &str, token_override: Option<String>) -> Result<(), 
         println!("  {email}");
     } else {
         println!("  {email} ({name})");
+    }
+    let orgs = org_lines(&info);
+    if !orgs.is_empty() {
+        println!("  organizations (select with --org or \"organization\" in the config):");
+        for line in orgs {
+            println!("{line}");
+        }
     }
     if from_store {
         let path = token_path()
@@ -378,4 +430,38 @@ fn save_tokens(tokens: &TokenStore) -> Result<(), CliError> {
 fn load_tokens() -> Option<TokenStore> {
     let data = std::fs::read_to_string(token_path()?).ok()?;
     serde_json::from_str(&data).ok()
+}
+
+#[cfg(test)]
+mod org_tests {
+    use super::*;
+
+    #[test]
+    fn with_org_appends_encoded_slug() {
+        let url = "https://stepshots.com/api/demos/upload-bundle".to_string();
+        assert_eq!(with_org(url.clone(), None), url);
+        assert_eq!(
+            with_org(url, Some("acme co&x")),
+            "https://stepshots.com/api/demos/upload-bundle?org=acme+co%26x"
+        );
+    }
+
+    #[test]
+    fn org_lines_mark_personal_and_tolerate_old_servers() {
+        let info = serde_json::json!({
+            "email": "a@b.c",
+            "orgs": [
+                {"id": "1", "name": "Hauke", "slug": "hauke", "personal": true, "role": "owner"},
+                {"id": "2", "name": "Acme", "slug": "acme", "personal": false, "role": "member"}
+            ]
+        });
+        assert_eq!(
+            org_lines(&info),
+            vec![
+                "    hauke  Hauke (owner, personal)",
+                "    acme  Acme (member)"
+            ]
+        );
+        assert!(org_lines(&serde_json::json!({"email": "a@b.c"})).is_empty());
+    }
 }

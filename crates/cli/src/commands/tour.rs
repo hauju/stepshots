@@ -130,11 +130,13 @@ pub fn export(
 /// Push tour source files to the dashboard: upsert hosted tours by `key`.
 /// One-way sync — git stays the source of truth, the hosted copy is
 /// overwritten, never merged. Check hints are stripped; only the runtime
-/// track plus metadata is sent.
+/// track plus metadata is sent. `org` (a team slug) is sent as `?org=`;
+/// unset means the personal workspace.
 pub async fn push(
     paths: &[PathBuf],
     server_url: &str,
     token: &str,
+    org: Option<&str>,
     json: bool,
 ) -> Result<(), CliError> {
     let files = collect_tour_files(paths)?;
@@ -179,7 +181,10 @@ pub async fn push(
             "steps": track.steps,
         });
         let resp = client
-            .put(format!("{server}/api/tours/push"))
+            .put(crate::auth::with_org(
+                format!("{server}/api/tours/push"),
+                org,
+            ))
             .header("Authorization", format!("Bearer {token}"))
             .json(&body)
             .send()

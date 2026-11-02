@@ -17,6 +17,8 @@ pub struct UploadResult {
 /// If `replace_demo_id` is set, replaces that existing demo instead of creating new ones.
 /// `public` makes newly created demos publicly viewable at insert time.
 /// `json` suppresses human-readable output and prints a single JSON object instead.
+/// `org` (a team slug) is sent as `?org=`; unset means the personal workspace.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     files: &[String],
     title_override: Option<&str>,
@@ -25,6 +27,7 @@ pub async fn run(
     json: bool,
     server_url: &str,
     token: &str,
+    org: Option<&str>,
 ) -> Result<Vec<UploadResult>, CliError> {
     let client = reqwest::Client::new();
     let mut results = Vec::new();
@@ -40,6 +43,7 @@ pub async fn run(
                 json,
                 server_url,
                 token,
+                org,
             )
             .await?,
         );
@@ -80,6 +84,7 @@ pub(crate) async fn upload_one(
     quiet: bool,
     server_url: &str,
     token: &str,
+    org: Option<&str>,
 ) -> Result<UploadResult, CliError> {
     let json = quiet;
     {
@@ -108,9 +113,12 @@ pub(crate) async fn upload_one(
                 println!("Replacing demo {demo_id} with: {file_path}");
             }
 
-            let url = format!(
-                "{}/api/demos/{demo_id}/replace-bundle",
-                server_url.trim_end_matches('/')
+            let url = crate::auth::with_org(
+                format!(
+                    "{}/api/demos/{demo_id}/replace-bundle",
+                    server_url.trim_end_matches('/')
+                ),
+                org,
             );
 
             let resp = send_with_retry(
@@ -164,9 +172,12 @@ pub(crate) async fn upload_one(
                 println!("Uploading: {file_path} as \"{title}\"");
             }
 
-            let url = format!(
-                "{}/api/demos/upload-bundle",
-                server_url.trim_end_matches('/')
+            let url = crate::auth::with_org(
+                format!(
+                    "{}/api/demos/upload-bundle",
+                    server_url.trim_end_matches('/')
+                ),
+                org,
             );
 
             let resp = send_with_retry(

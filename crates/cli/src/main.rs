@@ -201,6 +201,24 @@ enum Commands {
         #[arg(long, value_enum, default_value = "fail")]
         fail_on: commands::verify::FailOn,
 
+        /// Server to report results to, for tutorials that set `demoId`
+        #[arg(
+            long,
+            env = "STEPSHOTS_SERVER",
+            default_value = "https://stepshots.com"
+        )]
+        server: String,
+
+        /// API token (defaults to the stored login token). Without one,
+        /// results are not reported.
+        #[arg(long, env = "STEPSHOTS_TOKEN")]
+        token: Option<String>,
+
+        /// Team (organization slug) to act in; overrides `organization` in
+        /// the config. Default: your personal workspace
+        #[arg(long, value_name = "SLUG")]
+        org: Option<String>,
+
         /// Persistent browser profile directory (for authenticated flows)
         #[arg(long, env = "STEPSHOTS_PROFILE_DIR")]
         profile_dir: Option<PathBuf>,
@@ -289,6 +307,11 @@ enum Commands {
         /// Make new demos publicly viewable immediately (ignored with --demo-id)
         #[arg(long)]
         public: bool,
+
+        /// Team (organization slug) to act in; overrides `organization` in
+        /// the config. Default: your personal workspace
+        #[arg(long, value_name = "SLUG")]
+        org: Option<String>,
 
         /// Server URL
         #[arg(
@@ -481,6 +504,11 @@ enum TourCommands {
         #[arg(value_name = "PATH")]
         paths: Vec<PathBuf>,
 
+        /// Team (organization slug) to act in; overrides `organization` in
+        /// the config. Default: your personal workspace
+        #[arg(long, value_name = "SLUG")]
+        org: Option<String>,
+
         /// Server URL
         #[arg(
             long,
@@ -664,6 +692,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 paths,
                 server,
                 token,
+                org,
             } => {
                 let token = token
                     .or_else(|| auth::stored_token_for(&server))
@@ -673,7 +702,8 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                                 .into(),
                         )
                     })?;
-                commands::tour::push(&paths, &server, &token, json).await?;
+                let org = org.or_else(|| config_organization(cli.config.as_deref()));
+                commands::tour::push(&paths, &server, &token, org.as_deref(), json).await?;
             }
             TourCommands::Schema => {
                 println!("{}", commands::schema::generate_tour()?);
@@ -715,6 +745,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             }
             commands::record::run(
                 &config,
+                &config_path,
                 &selected,
                 &output,
                 dry_run,
@@ -821,6 +852,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             tutorial,
             save_failures,
             fail_on,
+            server,
+            token,
+            org,
             profile_dir,
             storage_state,
         } => {
@@ -831,6 +865,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             if !json {
                 println!("Using config: {}", config_path.display());
             }
+            let token = token.or_else(|| auth::stored_token_for(&server));
             commands::verify::run(
                 &config,
                 &config_path,
@@ -842,6 +877,8 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                     profile_dir: profile_dir.as_deref(),
                     storage_state: storage_state.as_deref(),
                 },
+                token.as_deref().map(|t| (server.as_str(), t)),
+                org.or_else(|| config.organization.clone()).as_deref(),
             )
             .await?;
         }
@@ -857,6 +894,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             title,
             demo_id,
             public,
+            org,
             server,
             token,
         } => {
@@ -876,6 +914,8 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 json,
                 &server,
                 &token,
+                org.or_else(|| config_organization(cli.config.as_deref()))
+                    .as_deref(),
             )
             .await?;
         }
@@ -919,4 +959,11 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+/// The `organization` of the project config, for commands that don't
+/// otherwise need a config: none found (or unreadable) means no team.
+fn config_organization(explicit: Option<&std::path::Path>) -> Option<String> {
+    let path = config::find_config(explicit).ok()?;
+    config::load_config(&path).ok()?.organization
 }

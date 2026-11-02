@@ -108,6 +108,10 @@ pub struct StepshotsConfig {
     /// default; password fields are never captured regardless of this setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_input_values: Option<bool>,
+    /// Slug of the team (organization) that `upload`, `tour push` and
+    /// `verify` act in. Unset means your personal workspace. `--org` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
     /// Tutorials to record, keyed by a short slug that becomes the output file name.
     pub tutorials: HashMap<String, TutorialConfig>,
 }
@@ -142,6 +146,11 @@ pub struct TutorialConfig {
     /// `tours/<key>.tour.json` after recording.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<RecordingTarget>,
+    /// Id of the dashboard demo this tutorial was uploaded as. When set and you
+    /// are logged in, `stepshots verify` reports its result to that demo so
+    /// the demo list shows whether it still matches your app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demo_id: Option<String>,
     /// Ordered actions to perform; each step becomes one screenshot in the demo.
     pub steps: Vec<StepConfig>,
 }
@@ -704,7 +713,25 @@ pub struct BundleManifest {
     pub start_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<DemoFormat>,
+    /// The git commit the recording reflects. `None` when it was not recorded
+    /// from inside a git repository (or by an older CLI).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceInfo>,
     pub steps: Vec<BundleManifestStep>,
+}
+
+/// Where a recording came from: the git state of the project holding the
+/// config, captured by `stepshots record`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInfo {
+    /// Full commit SHA (`git rev-parse HEAD`).
+    pub commit: String,
+    /// Branch name; `None` on a detached HEAD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// When the recording was made, RFC 3339.
+    pub recorded_at: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -1427,5 +1454,53 @@ mod tour_file_tests {
         assert_eq!(file.schema, TOUR_FILE_SCHEMA_VERSION);
         assert_eq!(file.key, "quickstart");
         assert!(file.steps[0].check.is_none());
+    }
+}
+
+#[cfg(test)]
+mod source_info_tests {
+    use super::*;
+
+    fn bare() -> serde_json::Value {
+        serde_json::json!({
+            "version": 1,
+            "viewport": { "width": 1280, "height": 800 },
+            "steps": [{ "file": "steps/0.png" }]
+        })
+    }
+
+    #[test]
+    fn source_round_trips_in_camel_case() {
+        let mut json = bare();
+        json["source"] = serde_json::json!({
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+            "branch": "main",
+            "recordedAt": "2026-11-02T10:00:00Z"
+        });
+        let manifest: BundleManifest = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(
+            manifest.source,
+            Some(SourceInfo {
+                commit: "0123456789abcdef0123456789abcdef01234567".into(),
+                branch: Some("main".into()),
+                recorded_at: "2026-11-02T10:00:00Z".into(),
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&manifest).unwrap()["source"],
+            json["source"]
+        );
+    }
+
+    #[test]
+    fn bundles_without_source_still_parse_and_stay_unchanged() {
+        let manifest: BundleManifest = serde_json::from_value(bare()).unwrap();
+        assert_eq!(manifest.source, None);
+        assert!(
+            serde_json::to_value(&manifest)
+                .unwrap()
+                .get("source")
+                .is_none()
+        );
     }
 }

@@ -149,6 +149,8 @@ async fn handle_record(
         &output_path,
         false,
         crate::browser::SessionSource::default(),
+        // Extension recordings have no project directory to read a commit from.
+        None,
     )
     .await
     {
@@ -242,6 +244,7 @@ async fn handle_upload(
         false,
         &req.stepshots_url,
         &token,
+        None,
     )
     .await
     {

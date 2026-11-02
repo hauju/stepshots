@@ -121,6 +121,10 @@ pub struct UploadInput {
     /// Stepshots server URL (default: $STEPSHOTS_SERVER or https://stepshots.com)
     #[serde(default)]
     pub server: Option<String>,
+    /// Team (organization slug) to upload into; overrides `organization` in
+    /// stepshots.config.json. Unset with no config key means the personal workspace.
+    #[serde(default)]
+    pub org: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -213,7 +217,7 @@ impl StepshotsMcp {
         params: Parameters<RecordInput>,
     ) -> Result<CallToolResult, McpError> {
         let input = params.0;
-        let (cfg, _path) = self.load(input.config.as_deref())?;
+        let (cfg, path) = self.load(input.config.as_deref())?;
         let selected = config::select_tutorials(&cfg, &input.tutorials).map_err(to_mcp_error)?;
         let viewport = resolve_viewport(cfg.format.as_ref(), &cfg.viewport);
 
@@ -235,6 +239,7 @@ impl StepshotsMcp {
                     profile_dir: profile_dir.as_deref(),
                     storage_state: None,
                 },
+                path.parent(),
             )
             .await
             {
@@ -351,6 +356,13 @@ impl StepshotsMcp {
                 )
             })?;
 
+        // Same precedence as `stepshots upload`: explicit org > config key > personal.
+        // A missing config is fine here — uploads don't need one.
+        let org = input
+            .org
+            .clone()
+            .or_else(|| self.load(None).ok().and_then(|(cfg, _)| cfg.organization));
+
         let client = reqwest::Client::new();
         let mut demos = Vec::new();
         for file in &input.files {
@@ -363,6 +375,7 @@ impl StepshotsMcp {
                 true,
                 &server,
                 &token,
+                org.as_deref(),
             )
             .await
             .map_err(to_mcp_error)?;

@@ -24,6 +24,18 @@ inputs:
     description: "verify/tour-check: fail the step on 'fail' (broken steps) or 'warn' (also annotation or fallback-anchor drift)"
     required: false
     default: "fail"
+  on-drift:
+    description: "verify only: 'fail' fails the step; 'pull-request' re-records the affected tutorials into bundles-dir, renders contact sheets, and opens (or updates) a pull request with them. Needs contents: write and pull-requests: write"
+    required: false
+    default: "fail"
+  bundles-dir:
+    description: "verify with on-drift: pull-request — the committed directory holding your .stepshot bundles; re-recorded bundles and their contact sheets are written here"
+    required: false
+    default: "output"
+  pr-token:
+    description: "verify with on-drift: pull-request — token that pushes the branch and opens the PR. PRs opened with the default GITHUB_TOKEN do not trigger other workflows; pass a PAT or app token if they must"
+    required: false
+    default: ${{ github.token }}
   url:
     description: "tour-check only: base URL of the deploy to replay tours against (required)"
     required: false
@@ -39,7 +51,7 @@ inputs:
     required: false
     default: "false"
   token:
-    description: "Stepshots API token (required if upload is true)"
+    description: "Stepshots API token (required if upload is true). With verify, also reports each result to the dashboard demo named by the tutorial's demoId"
     required: false
   server:
     description: "Stepshots server URL"
@@ -67,6 +79,9 @@ outputs:
   report:
     description: "Path to the JSON report (verify and tour-check commands only)"
     value: ${{ steps.verify.outputs.report || steps.tour_check.outputs.report }}
+  pull-request-url:
+    description: "URL of the pull request opened for drifted demos (verify with on-drift: pull-request)"
+    value: ${{ steps.drift_pr.outputs.pull-request-url }}
 
 runs:
   using: "composite"
@@ -208,7 +223,15 @@ runs:
         INPUT_OUTPUT: ${{ inputs.output }}
         INPUT_TUTORIALS: ${{ inputs.tutorials }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_ON_DRIFT: ${{ inputs.on-drift }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        STEPSHOTS_SERVER: ${{ inputs.server }}
       run: |
+        # An empty token must not reach the CLI as a (blank) credential.
+        if [ -n "$INPUT_TOKEN" ]; then
+          export STEPSHOTS_TOKEN="$INPUT_TOKEN"
+        fi
+
         ARGS=(--config "$INPUT_CONFIG" --save-failures "$INPUT_OUTPUT" --fail-on "$INPUT_FAIL_ON")
 
         if [ -n "$INPUT_TUTORIALS" ]; then
@@ -247,7 +270,104 @@ runs:
           cat "$REPORT"
         fi
 
+        # Pull-request mode: hand the affected tutorials to the re-record step
+        # instead of failing here. Only when verify produced a report — a
+        # config or browser error still fails the step.
+        if [ "$INPUT_ON_DRIFT" = "pull-request" ] && [ "$EXIT" -ne 0 ] \
+          && jq -e '.summary' "$REPORT" > /dev/null 2>&1; then
+          AFFECTED="$(jq -r '[.tutorials[] | select(.status != "ok") | .key] | join(",")' "$REPORT")"
+          if [ -n "$AFFECTED" ]; then
+            echo "affected=$AFFECTED" >> "$GITHUB_OUTPUT"
+            echo "::warning::demos no longer match the app ($AFFECTED) — re-recording for a pull request"
+            exit 0
+          fi
+        fi
+
         exit "$EXIT"
+
+    - name: Re-record drifted tutorials
+      if: inputs.command == 'verify' && inputs.on-drift == 'pull-request' && steps.verify.outputs.affected != ''
+      id: rerecord
+      shell: bash
+      env:
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_BUNDLES_DIR: ${{ inputs.bundles-dir }}
+        AFFECTED: ${{ steps.verify.outputs.affected }}
+        VERIFY_REPORT: ${{ steps.verify.outputs.report }}
+        REPO: ${{ github.repository }}
+        SHA: ${{ github.sha }}
+        BRANCH: stepshots/re-record
+      run: |
+        set -uo pipefail
+        ARGS=(--config "$INPUT_CONFIG" --output "$INPUT_BUNDLES_DIR")
+        IFS=',' read -ra KEYS <<< "$AFFECTED"
+        for k in "${KEYS[@]}"; do ARGS+=(--tutorial "$k"); done
+
+        # Keep going on failure: a tutorial whose step no longer runs can't be
+        # re-recorded from the same config, but the others still can.
+        mkdir -p "$INPUT_BUNDLES_DIR"
+        RECORD_REPORT="$RUNNER_TEMP/stepshots-rerecord.json"
+        stepshots record "${ARGS[@]}" --json > "$RECORD_REPORT" || true
+
+        DIR="${INPUT_BUNDLES_DIR#./}"
+        BODY="$RUNNER_TEMP/stepshots-pr-body.md"
+        {
+          echo "\`stepshots verify\` found demos that no longer match the app at ${SHA:0:7}. This PR re-records them."
+          echo ""
+        } > "$BODY"
+
+        PATHS=()
+        RECORDED=0
+        for k in "${KEYS[@]}"; do
+          echo "### \`$k\`" >> "$BODY"
+          jq -r --arg k "$k" '.tutorials[] | select(.key == $k) |
+            ([.steps[] | select(.status == "fail") | "- step \(.index + 1): \(.action) — \(.message)"]
+             + [.annotation_warnings[]? | "- step \(.step + 1): \(.kind) `\(.selector)` drifted"]
+             + (if .error then ["- start page: \(.error.message)"] else [] end))[]' \
+            "$VERIFY_REPORT" >> "$BODY"
+
+          OUT="$(jq -r --arg k "$k" '.tutorials[]? | select(.key == $k) | .output // empty' "$RECORD_REPORT")"
+          if [ -n "$OUT" ] && [ -f "$OUT" ]; then
+            stepshots sheet "$OUT"
+            PATHS+=("$DIR/$k.stepshot" "$DIR/$k.sheet.png")
+            RECORDED=$((RECORDED + 1))
+            echo "" >> "$BODY"
+            echo "![$k contact sheet](https://github.com/$REPO/blob/$BRANCH/$DIR/$k.sheet.png?raw=true)" >> "$BODY"
+          else
+            echo "- ⚠️ could not be re-recorded — a step no longer runs; update this tutorial in the config" >> "$BODY"
+            echo "::warning::could not re-record $k; it needs a config fix"
+          fi
+          echo "" >> "$BODY"
+        done
+
+        if [ "$RECORDED" -eq 0 ]; then
+          echo "::error::no affected tutorial could be re-recorded — update the config (see the verify report)"
+          cat "$BODY" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+
+        echo "body-path=$BODY" >> "$GITHUB_OUTPUT"
+        {
+          echo "paths<<EOF"
+          printf '%s\n' "${PATHS[@]}"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Open drift pull request
+      if: steps.rerecord.outputs.body-path != ''
+      id: drift_pr
+      uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+      with:
+        token: ${{ inputs.pr-token }}
+        # pull_request checkouts are a detached HEAD; create-pull-request then
+        # needs the base named explicitly or it refuses to open the PR.
+        base: ${{ github.head_ref || github.ref_name }}
+        branch: stepshots/re-record
+        delete-branch: true
+        add-paths: ${{ steps.rerecord.outputs.paths }}
+        commit-message: "chore(demos): re-record demos that drifted from the app"
+        title: "Re-record demos that no longer match the app"
+        body-path: ${{ steps.rerecord.outputs.body-path }}
 
     - name: Check guided tours
       if: inputs.command == 'tour-check'

@@ -362,6 +362,7 @@ pub fn sample_config() -> String {
         capture_dom: None,
         redact_selectors: Vec::new(),
         capture_input_values: None,
+        organization: None,
         tutorials: HashMap::from([(
             "getting-started".into(),
             TutorialConfig {
@@ -369,6 +370,7 @@ pub fn sample_config() -> String {
                 title: "Getting Started".into(),
                 description: Some("A quick tour of the product.".into()),
                 target: None,
+                demo_id: None,
                 steps: vec![
                     StepConfig {
                         action: "click".into(),
@@ -440,6 +442,16 @@ mod tests {
 
     unsafe fn remove_var(key: &str) {
         unsafe { std::env::remove_var(key) };
+    }
+
+    #[test]
+    fn organization_is_optional() {
+        let base = r#"{"baseUrl": "https://x.dev", "tutorials": {}}"#;
+        let cfg: StepshotsConfig = serde_json::from_str(base).unwrap();
+        assert_eq!(cfg.organization, None);
+        let with_org = r#"{"baseUrl": "https://x.dev", "organization": "acme", "tutorials": {}}"#;
+        let cfg: StepshotsConfig = serde_json::from_str(with_org).unwrap();
+        assert_eq!(cfg.organization.as_deref(), Some("acme"));
     }
 
     #[test]
@@ -592,6 +604,7 @@ mod tests {
             title: "Test".into(),
             description: None,
             target: None,
+            demo_id: None,
             steps: vec![],
         };
         let errors = validate_tutorial("test", &tutorial);

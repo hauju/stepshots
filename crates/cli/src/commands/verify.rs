@@ -28,6 +28,11 @@ pub enum FailOn {
 /// Verify that tutorials still replay against the live app. Replays every
 /// step headless like `record` does, but writes no bundle — the output is
 /// a per-step drift report and an exit code.
+///
+/// With `report` (server, token), each tutorial that names its dashboard demo
+/// (`demoId`) also gets its result posted there. Best-effort: verification is
+/// a local check first, so a failed post is a warning, never an error.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     config: &StepshotsConfig,
     config_path: &Path,
@@ -36,6 +41,8 @@ pub async fn run(
     fail_on: FailOn,
     json: bool,
     session: crate::browser::SessionArgs<'_>,
+    report: Option<(&str, &str)>,
+    org: Option<&str>,
 ) -> Result<(), CliError> {
     let selected = select_tutorials(config, tutorials)?;
     let viewport = resolve_viewport(config.format.as_ref(), &config.viewport);
@@ -69,6 +76,8 @@ pub async fn run(
         results.push(result);
     }
 
+    report_results(config, config_path, &results, report, org, json).await;
+
     let summary = summarize(&results);
     let should_fail = exits_nonzero(&summary, fail_on);
 
@@ -93,6 +102,126 @@ pub async fn run(
 
     if should_fail {
         return Err(CliError::Reported { code: 1 });
+    }
+    Ok(())
+}
+
+/// Post each linked tutorial's result to its dashboard demo. Messages go to
+/// stderr so `--json` output stays parseable.
+async fn report_results(
+    config: &StepshotsConfig,
+    config_path: &Path,
+    results: &[VerifyTutorial],
+    report: Option<(&str, &str)>,
+    org: Option<&str>,
+    json: bool,
+) {
+    let linked: Vec<(&VerifyTutorial, &str)> = results
+        .iter()
+        .filter_map(|r| {
+            let demo_id = config.tutorials.get(&r.key)?.demo_id.as_deref()?;
+            Some((r, demo_id))
+        })
+        .collect();
+    if linked.is_empty() {
+        return;
+    }
+    let Some((server, token)) = report else {
+        if !json {
+            eprintln!(
+                "Not logged in — results not reported to the dashboard (run `stepshots login`)."
+            );
+        }
+        return;
+    };
+    let commit = config_path
+        .parent()
+        .and_then(super::record::git_source)
+        .map(|s| s.commit);
+    for (result, demo_id) in linked {
+        let body = verification_payload(result, commit.as_deref());
+        match post_verification(server, token, org, demo_id, &body).await {
+            Ok(()) if !json => println!("  → reported {} to {server} (demo {demo_id})", result.key),
+            Ok(()) => {}
+            Err(e) => eprintln!(
+                "  warning: could not report {} to the dashboard: {e}",
+                result.key
+            ),
+        }
+    }
+}
+
+/// The body for `POST /api/demos/{id}/verification`: a pass/fail verdict and
+/// one finding per broken step (`fail`) or drifted annotation (`warn`).
+fn verification_payload(result: &VerifyTutorial, commit: Option<&str>) -> serde_json::Value {
+    let mut findings = Vec::new();
+    if let Some(err) = &result.error {
+        findings.push(serde_json::json!({
+            "severity": "fail",
+            "message": format!("Start page failed to load: {}", err.message),
+        }));
+    }
+    for step in &result.steps {
+        if let Some(f) = step.failure.as_ref().filter(|_| step.status == "fail") {
+            let target = step
+                .selector
+                .as_deref()
+                .map(|s| format!(" '{s}'"))
+                .unwrap_or_default();
+            findings.push(serde_json::json!({
+                "step": step.index + 1,
+                "severity": "fail",
+                "message": format!("{}{target}: {}", step.action, f.message),
+            }));
+        }
+    }
+    for w in &result.annotation_warnings {
+        let why = match w.reason {
+            "off_screen" => "resolved off-screen",
+            _ => "no longer exists",
+        };
+        findings.push(serde_json::json!({
+            "step": w.step + 1,
+            "severity": "warn",
+            "message": format!("{} '{}' {why}", w.kind, w.selector),
+        }));
+    }
+    serde_json::json!({
+        "verdict": if result.status == "fail" { "fail" } else { "pass" },
+        "findings": findings,
+        "commit": commit,
+        "verified_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    })
+}
+
+async fn post_verification(
+    server: &str,
+    token: &str,
+    org: Option<&str>,
+    demo_id: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    let url = crate::auth::with_org(
+        format!(
+            "{}/api/demos/{demo_id}/verification",
+            server.trim_end_matches('/')
+        ),
+        org,
+    );
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(15))
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| format!("could not reach {url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "{} {}",
+            resp.status(),
+            resp.text().await.unwrap_or_default()
+        ));
     }
     Ok(())
 }
@@ -453,6 +582,60 @@ mod tests {
     fn fail_on_warn_also_fails_on_drift() {
         assert!(exits_nonzero(&summary(1, 2, 0), FailOn::Warn));
         assert!(!exits_nonzero(&summary(3, 0, 0), FailOn::Warn));
+    }
+
+    #[test]
+    fn payload_reports_broken_steps_and_drifted_annotations() {
+        let failure = VerifyFailure {
+            reason: "orphaned",
+            message: "element not found".into(),
+            page_url: None,
+            screenshot: None,
+            hint: String::new(),
+        };
+        let result = VerifyTutorial {
+            key: "demo".into(),
+            title: "Demo".into(),
+            status: "fail",
+            error: None,
+            steps: vec![VerifyStep {
+                index: 1,
+                name: None,
+                action: "click".into(),
+                selector: Some("#save".into()),
+                status: "fail",
+                failure: Some(failure),
+            }],
+            annotation_warnings: vec![VerifyAnnotationWarning {
+                step: 0,
+                kind: "highlight",
+                selector: ".nav".into(),
+                reason: "off_screen",
+            }],
+        };
+        let body = verification_payload(&result, Some("abc1234"));
+        assert_eq!(body["verdict"], "fail");
+        assert_eq!(body["commit"], "abc1234");
+        assert_eq!(
+            body["findings"],
+            serde_json::json!([
+                { "step": 2, "severity": "fail", "message": "click '#save': element not found" },
+                { "step": 1, "severity": "warn", "message": "highlight '.nav' resolved off-screen" }
+            ])
+        );
+    }
+
+    #[test]
+    fn annotation_drift_alone_still_passes() {
+        let result = VerifyTutorial {
+            key: "demo".into(),
+            title: "Demo".into(),
+            status: "warn",
+            error: None,
+            steps: vec![],
+            annotation_warnings: vec![],
+        };
+        assert_eq!(verification_payload(&result, None)["verdict"], "pass");
     }
 
     #[test]

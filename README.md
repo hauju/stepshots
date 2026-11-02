@@ -221,7 +221,7 @@ Log in through your browser — this stores an API token locally at `~/.config/s
 stepshots login
 ```
 
-Check which account you're logged in as:
+Check which account you're logged in as (and which teams you belong to):
 
 ```sh
 stepshots whoami
@@ -245,7 +245,7 @@ stepshots upload output/my-tutorial.stepshot --demo-id <DEMO_ID>
 stepshots upload output/my-tutorial.stepshot --server https://your-instance.com
 ```
 
-Uploads use your `stepshots login` session, or `STEPSHOTS_TOKEN` / `--token` when set. Override the server with `--server` or `STEPSHOTS_SERVER`. Add `--public` to make new demos publicly viewable right away (ignored with `--demo-id`).
+Uploads use your `stepshots login` session, or `STEPSHOTS_TOKEN` / `--token` when set. Override the server with `--server` or `STEPSHOTS_SERVER`. Add `--public` to make new demos publicly viewable right away (ignored with `--demo-id`). To upload into a team instead of your personal workspace, pass `--org <slug>` or set `"organization": "<slug>"` in `stepshots.config.json`; the same applies to `tour push` and `verify`.
 
 ### Check your setup
 

@@ -54,6 +54,13 @@
         }
       ]
     },
+    "organization": {
+      "description": "Slug of the team (organization) that `upload`, `tour push` and\n`verify` act in. Unset means your personal workspace. `--org` overrides it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "redactSelectors": {
       "description": "CSS selectors whose subtrees are elided from DOM extracts entirely.\nApplies on top of blur regions, which redact by geometry.",
       "type": "array",
@@ -579,6 +586,13 @@
       "description": "A single tutorial within the config.",
       "type": "object",
       "properties": {
+        "demoId": {
+          "description": "Id of the dashboard demo this tutorial was uploaded as. When set and you\nare logged in, `stepshots verify` reports its result to that demo so\nthe demo list shows whether it still matches your app.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "description": {
           "description": "Optional longer description of what the tutorial shows.",
           "type": [
