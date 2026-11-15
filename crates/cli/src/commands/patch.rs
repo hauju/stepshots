@@ -363,7 +363,9 @@ fn save(
     let tmp = bundle_path.with_extension("stepshot.tmp");
     let bak = bundle_path.with_extension("stepshot.bak");
     // No DOM extracts: `run` drops them, since patching invalidates them.
-    create_bundle(manifest, screenshots, frames, &HashMap::new(), &tmp)?;
+    // No recipe: a patched bundle holds hand-captured steps the recorded
+    // config doesn't have, so its steps no longer line up with any config.
+    create_bundle(manifest, screenshots, frames, &HashMap::new(), None, &tmp)?;
     std::fs::copy(bundle_path, &bak)?;
     std::fs::rename(&tmp, bundle_path)?;
     Ok(bak)

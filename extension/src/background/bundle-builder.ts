@@ -1,6 +1,14 @@
 import { zipSync } from "fflate";
+import { buildConfig } from "../utils/config-builder";
 import { generateStepSummary } from "../utils/step-summary";
-import type { ElementBounds, Highlight, RecordedStep, RecordingState, Viewport } from "../types";
+import type {
+  ClickthroughConfig,
+  ElementBounds,
+  Highlight,
+  RecordedStep,
+  RecordingState,
+  Viewport,
+} from "../types";
 
 /** Convert a data URL (image/webp or image/png) to a Uint8Array. */
 function dataUrlToBytes(dataUrl: string): Uint8Array {
@@ -29,6 +37,8 @@ export function buildBundle(
 ): Uint8Array {
   const files: Record<string, Uint8Array> = {};
   const manifestSteps: ManifestStep[] = [];
+  // The recorded steps that made it into the bundle, in bundle order.
+  const bundledSteps: RecordedStep[] = [];
 
   // Each recorded step produces one screenshot for its own scene.
   for (let i = 0; i < state.steps.length; i++) {
@@ -71,6 +81,7 @@ export function buildBundle(
     }
 
     manifestSteps.push(manifestStep);
+    bundledSteps.push(step);
   }
 
   const manifest = {
@@ -89,8 +100,35 @@ export function buildBundle(
 
   const encoder = new TextEncoder();
   files["manifest.json"] = encoder.encode(JSON.stringify(manifest, null, 2));
+  files["recipe.json"] = encoder.encode(
+    JSON.stringify(buildRecipe({ ...state, steps: bundledSteps }, viewport), null, 2),
+  );
 
   return zipSync(files);
+}
+
+/**
+ * The bundle's `recipe.json`: the recording as a one-tutorial config whose
+ * step `i` produced manifest step `i`, so the dashboard can re-record it.
+ * Highlights drop their captured bounds and re-resolve against the step's
+ * selector; sensitive steps carry no input and are marked `secret`.
+ */
+function buildRecipe(state: RecordingState, viewport: Viewport): ClickthroughConfig {
+  const config = buildConfig({ ...state, viewport });
+  const steps = Object.values(config.tutorials)[0]?.steps ?? [];
+  steps.forEach((step, i) => {
+    if (state.steps[i]?.meta?.sensitive) {
+      delete step.text;
+      delete step.value;
+      step.secret = true;
+    }
+    if (step.selector) {
+      for (const h of step.highlights) {
+        delete h.bounds;
+      }
+    }
+  });
+  return config;
 }
 
 interface ManifestHighlight {

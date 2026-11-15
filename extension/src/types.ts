@@ -38,6 +38,8 @@ export interface StepConfig {
   sceneScrollY?: number;
   sceneScrollX?: number;
   delay?: number;
+  /** Input was not recorded (password or other sensitive field). */
+  secret?: boolean;
   highlights: Highlight[];
 }
 

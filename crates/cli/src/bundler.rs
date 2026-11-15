@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 
-use manifest::BundleManifest;
+use manifest::{BundleManifest, RECIPE_FILE, StepshotsConfig};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -15,11 +15,16 @@ use crate::error::CliError;
 /// DOM extracts are input to the sandbox generator and are never rendered. They
 /// must already be redacted by the time they reach here — see
 /// `docs/dom-extract-spec.md`.
+///
+/// `recipe`, when given, is written as [`RECIPE_FILE`]: the config the bundle
+/// was recorded with, step for step, so the dashboard can re-record it. It
+/// must already be stripped of secrets.
 pub fn create_bundle(
     manifest: &BundleManifest,
     screenshots: &[Vec<u8>],
     transition_frames: &HashMap<usize, Vec<Vec<u8>>>,
     dom_extracts: &HashMap<usize, Vec<u8>>,
+    recipe: Option<&StepshotsConfig>,
     output_path: &Path,
 ) -> Result<(), CliError> {
     if manifest.steps.len() != screenshots.len() {
@@ -44,6 +49,11 @@ pub fn create_bundle(
     let manifest_json = serde_json::to_string_pretty(manifest)?;
     zip.start_file("manifest.json", options)?;
     zip.write_all(manifest_json.as_bytes())?;
+
+    if let Some(recipe) = recipe {
+        zip.start_file(RECIPE_FILE, options)?;
+        zip.write_all(serde_json::to_string_pretty(recipe)?.as_bytes())?;
+    }
 
     // Write each screenshot
     for (i, png_bytes) in screenshots.iter().enumerate() {
@@ -200,7 +210,15 @@ mod tests {
         frames.insert(1, vec![vec![5u8], vec![6u8]]);
 
         let path = temp_path("roundtrip.stepshot");
-        create_bundle(&manifest, &screenshots, &frames, &HashMap::new(), &path).unwrap();
+        create_bundle(
+            &manifest,
+            &screenshots,
+            &frames,
+            &HashMap::new(),
+            None,
+            &path,
+        )
+        .unwrap();
         let (read_manifest, read_shots, read_frames, read_dom) = read_bundle(&path).unwrap();
         std::fs::remove_file(&path).unwrap();
 
@@ -208,6 +226,36 @@ mod tests {
         assert_eq!(read_shots, screenshots);
         assert_eq!(read_frames, frames);
         assert!(read_dom.is_empty());
+    }
+
+    #[test]
+    fn writes_the_recipe_entry() {
+        let manifest = manifest(json!([{ "file": "steps/0.webp" }]));
+        let recipe: StepshotsConfig = serde_json::from_value(json!({
+            "baseUrl": "https://app.test",
+            "tutorials": { "t": { "url": "/", "title": "T", "steps": [{ "action": "wait" }] } }
+        }))
+        .unwrap();
+        let path = temp_path("recipe.stepshot");
+        create_bundle(
+            &manifest,
+            &[vec![1u8]],
+            &HashMap::new(),
+            &HashMap::new(),
+            Some(&recipe),
+            &path,
+        )
+        .unwrap();
+        let mut archive = ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut raw = String::new();
+        archive
+            .by_name(RECIPE_FILE)
+            .unwrap()
+            .read_to_string(&mut raw)
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let back: StepshotsConfig = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back.tutorials["t"].steps.len(), 1);
     }
 
     #[test]
@@ -223,7 +271,15 @@ mod tests {
         extracts.insert(1, br#"{"v":1}"#.to_vec());
 
         let path = temp_path("dom-roundtrip.stepshot");
-        create_bundle(&manifest, &screenshots, &HashMap::new(), &extracts, &path).unwrap();
+        create_bundle(
+            &manifest,
+            &screenshots,
+            &HashMap::new(),
+            &extracts,
+            None,
+            &path,
+        )
+        .unwrap();
         let (_, _, _, read_dom) = read_bundle(&path).unwrap();
         std::fs::remove_file(&path).unwrap();
 
@@ -246,6 +302,7 @@ mod tests {
             &screenshots,
             &HashMap::new(),
             &HashMap::new(),
+            None,
             &path,
         )
         .unwrap();
@@ -271,6 +328,7 @@ mod tests {
             &screenshots,
             &HashMap::new(),
             &HashMap::new(),
+            None,
             &path,
         )
         .unwrap();
@@ -292,6 +350,7 @@ mod tests {
             &[vec![1u8]],
             &HashMap::new(),
             &HashMap::new(),
+            None,
             &path,
         )
         .unwrap();

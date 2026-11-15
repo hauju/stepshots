@@ -32,6 +32,13 @@ pub const VALID_ACTIONS: &[&str] = &[
     "select",
 ];
 
+/// Bundle entry holding the config a bundle was recorded with: a
+/// [`StepshotsConfig`] with exactly one tutorial, secrets stripped, whose
+/// step `i` produced manifest step `i`. Lets a server re-record the demo.
+/// Owner-only: it can hold typed text and selectors that map the app, so it
+/// is never served to viewers.
+pub const RECIPE_FILE: &str = "recipe.json";
+
 /// Callout placements accepted for highlights and hotspots.
 pub const VALID_POSITIONS: &[&str] = &["top", "bottom", "left", "right"];
 
@@ -1111,7 +1118,12 @@ impl From<&BundleManifestStep> for StepConfig {
             selector: step.selector.clone(),
             selector_quality: step.selector_quality.clone(),
             text: step.text.clone(),
-            url: step.url.clone(),
+            // `url` is the page the step was captured on; the configured
+            // navigate target is `target_url`.
+            url: match step.action.as_deref() {
+                Some("navigate") => step.target_url.clone().or_else(|| step.url.clone()),
+                _ => step.url.clone(),
+            },
             key: step.key.clone(),
             value: step.value.clone(),
             delay: step.delay,
@@ -1121,7 +1133,22 @@ impl From<&BundleManifestStep> for StepConfig {
             scene_scroll_x: step.scene_scroll_x,
             scene_scroll_y: step.scene_scroll_y,
             highlight_selector: None,
-            highlights: vec![],
+            // Style and copy only: without bounds the highlight re-resolves
+            // against the step's selector, so it follows the element. A step
+            // with no selector has nothing to resolve against and keeps them.
+            highlights: step
+                .highlights
+                .iter()
+                .flatten()
+                .map(|h| HighlightConfig {
+                    bounds: step.selector.is_none().then(|| h.bounds.clone()),
+                    show_border: h.border_width.map(|w| w > 0.0),
+                    callout: h.callout.clone(),
+                    position: h.position.clone(),
+                    color: h.color.clone(),
+                    arrow: h.arrow,
+                })
+                .collect(),
             blur_regions: vec![],
             arrows: vec![],
             hotspots: vec![],
@@ -1502,5 +1529,48 @@ mod source_info_tests {
                 .get("source")
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod step_config_from_bundle_tests {
+    use super::*;
+
+    fn step(v: serde_json::Value) -> BundleManifestStep {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn navigate_replays_its_target_not_the_page_it_was_captured_on() {
+        let s = step(serde_json::json!({
+            "file": "steps/0.webp", "action": "navigate",
+            "url": "https://app.test/", "target_url": "/settings"
+        }));
+        assert_eq!(StepConfig::from(&s).url.as_deref(), Some("/settings"));
+    }
+
+    #[test]
+    fn highlights_keep_style_and_re_resolve_against_the_selector() {
+        let s = step(serde_json::json!({
+            "file": "steps/0.webp", "action": "click", "selector": "#go",
+            "highlights": [{ "bounds": {"x":1,"y":2,"width":3,"height":4},
+                             "callout": "Go", "color": "#f00", "border_width": 0 }]
+        }));
+        let cfg = StepConfig::from(&s);
+        assert_eq!(cfg.highlights.len(), 1);
+        let h = &cfg.highlights[0];
+        assert!(h.bounds.is_none(), "re-resolved from #go");
+        assert_eq!(h.callout.as_deref(), Some("Go"));
+        assert_eq!(h.color.as_deref(), Some("#f00"));
+        assert_eq!(h.show_border, Some(false));
+    }
+
+    #[test]
+    fn highlight_without_a_selector_keeps_its_bounds() {
+        let s = step(serde_json::json!({
+            "file": "steps/0.webp", "action": "wait",
+            "highlights": [{ "bounds": {"x":1,"y":2,"width":3,"height":4} }]
+        }));
+        assert!(StepConfig::from(&s).highlights[0].bounds.is_some());
     }
 }

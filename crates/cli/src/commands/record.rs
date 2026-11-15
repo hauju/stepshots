@@ -267,6 +267,8 @@ pub async fn record_tutorial(
     let mut all_dom_extracts: std::collections::HashMap<usize, Vec<u8>> =
         std::collections::HashMap::new();
     let mut step_results: Vec<StepOutput> = Vec::with_capacity(step_count);
+    // Steps whose typed input was kept out of the bundle; the recipe drops it too.
+    let mut redacted_steps: Vec<usize> = Vec::new();
     // Annotations whose anchors drifted (element gone or off-screen) during recording.
     let mut drift: Vec<AnnotationDrift> = Vec::new();
     // Transition frames keyed by step index (0-based, matching screenshot index)
@@ -301,6 +303,9 @@ pub async fn record_tutorial(
                     ("type", Some(sel)) => browser.is_password_input(sel).await,
                     _ => false,
                 };
+            if redact_input {
+                redacted_steps.push(i);
+            }
             let capture_before_action = should_capture_before_action(step);
             restore_scene_scroll(&browser, step).await?;
 
@@ -570,15 +575,48 @@ pub async fn record_tutorial(
         steps: manifest_steps,
     };
 
+    // Every caller names the bundle after its tutorial key.
+    let key = output_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("recording");
+    let recipe = build_recipe(config, key, tutorial, &redacted_steps);
     create_bundle(
         &manifest,
         &screenshots,
         &all_transition_frames,
         &all_dom_extracts,
+        Some(&recipe),
         output_path,
     )?;
 
     Ok((step_results, None))
+}
+
+/// The bundle's `recipe.json`: `config` cut down to the one tutorial just
+/// recorded, so the dashboard can replay it step for step. Input that was kept
+/// out of the manifest (`redacted` step indices) is dropped here too and the
+/// step marked `secret`; the workspace and demo id are not the recording's.
+fn build_recipe(
+    config: &StepshotsConfig,
+    key: &str,
+    tutorial: &TutorialConfig,
+    redacted: &[usize],
+) -> StepshotsConfig {
+    let mut tutorial = tutorial.clone();
+    tutorial.demo_id = None;
+    for &i in redacted {
+        if let Some(step) = tutorial.steps.get_mut(i) {
+            step.text = None;
+            step.value = None;
+            step.secret = Some(true);
+        }
+    }
+    let mut recipe = config.clone();
+    recipe.schema = None;
+    recipe.organization = None;
+    recipe.tutorials = std::iter::once((key.to_string(), tutorial)).collect();
+    recipe
 }
 
 /// The git commit (and branch) checked out in `dir`, stamped with the current
@@ -1248,6 +1286,34 @@ mod tests {
             height: h,
             z_index: None,
         }
+    }
+
+    #[test]
+    fn recipe_is_one_tutorial_without_secrets_or_workspace() {
+        let config: StepshotsConfig = serde_json::from_value(serde_json::json!({
+            "baseUrl": "https://app.test",
+            "organization": "acme",
+            "defaultDelay": 900,
+            "tutorials": {
+                "login": { "url": "/", "title": "Login", "demoId": "d1", "steps": [
+                    { "action": "type", "selector": "#user", "text": "me" },
+                    { "action": "type", "selector": "#pw", "text": "hunter2" },
+                    { "action": "click", "selector": "#go" }
+                ] },
+                "other": { "url": "/", "title": "Other", "steps": [] }
+            }
+        }))
+        .unwrap();
+        let recipe = build_recipe(&config, "login", &config.tutorials["login"], &[1]);
+        assert!(recipe.organization.is_none());
+        assert_eq!(recipe.default_delay, 900);
+        assert_eq!(recipe.tutorials.len(), 1);
+        let t = &recipe.tutorials["login"];
+        assert!(t.demo_id.is_none());
+        assert_eq!(t.steps[0].text.as_deref(), Some("me"));
+        assert!(t.steps[1].text.is_none());
+        assert_eq!(t.steps[1].secret, Some(true));
+        assert!(t.steps[2].secret.is_none());
     }
 
     fn click_step(selector: &str, highlight_selector: Option<&str>) -> StepConfig {
